@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AppConfig } from "./config.js";
 import { buildResultsLink, slugCiudad } from "./deeplink.js";
-import { apiLocale, geocodeCity, searchResults, getDetails } from "./m4rApi.js";
+import { apiLocale, geocodeCity, searchResults, getDetails, createBooking } from "./m4rApi.js";
 import { findPolicies } from "./knowledge/policies.js";
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data en format YYYY-MM-DD");
@@ -226,4 +226,96 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       );
     },
   );
+
+  // 5) BOOKING amb pagament (Fase 3A) — NOMÉS si està configurat (checkoutBaseUrl + secret).
+  //    Cas acotat: recollida a botiga, sense extres. Crea el hold i torna la urlTpv de Stripe.
+  if (config.checkoutBaseUrl && config.checkoutSecret) {
+    server.registerTool(
+      "create_booking",
+      {
+        title: "Crea una reserva amb enllaç de pagament (recollida a botiga)",
+        description:
+          "Crea una reserva en estat 'hold' i retorna un ENLLAÇ DE PAGAMENT Stripe (urlTpv) que l'usuari obre per pagar. " +
+          "IMPORTANT: només per a RECOLLIDA A BOTIGA i SENSE extres/opcions. Abans de cridar-la, DEMANA el consentiment " +
+          "de l'usuari i les seves dades (nom, cognoms, email, telèfon amb prefix, país). Usa els identificadors obtinguts " +
+          "de search_mobility_rentals. El servidor recalcula el preu (no l'enviïs tu). Segons el proveïdor, l'usuari pot pagar " +
+          "un DIPÒSIT ara i la resta a la recollida: comunica-li el desglossament (pay_now / pay_at_pickup). Algunes reserves " +
+          "queden pendents de confirmació del punt de recollida. Si la resposta indica fallback (el proveïdor requereix el " +
+          "checkout complet) o si l'usuari vol lliurament/extres, usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
+        inputSchema: {
+          id_product_store: z.number().describe("id_product_store del resultat de cerca"),
+          id_store: z.number().describe("id_store del resultat de cerca"),
+          id_virtual: z.number().describe("id_virtual del resultat de cerca (0 si botiga física)"),
+          start_date: DATE.describe("Data d'inici (YYYY-MM-DD)"),
+          end_date: DATE.describe("Data de fi (YYYY-MM-DD)"),
+          customer: z
+            .object({
+              first_name: z.string().describe("Nom"),
+              last_name: z.string().describe("Cognoms"),
+              email: z.string().describe("Correu electrònic"),
+              phone: z.string().describe("Telèfon (sense prefix)"),
+              phone_prefix: z.string().optional().describe("Prefix internacional, p. ex. '+34'"),
+              country: z.string().describe("Codi de país ISO alpha-2, p. ex. 'ES'"),
+            })
+            .describe("Dades del client (amb consentiment)"),
+          language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'."),
+          newsletter: z.boolean().optional().describe("Consentiment de newsletter. Opcional."),
+          comments: z.string().optional().describe("Comentaris per a la botiga. Opcional."),
+        },
+      },
+      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, newsletter, comments }) => {
+        try {
+          const r = await createBooking(config.checkoutBaseUrl, config.checkoutSecret, {
+            idProductStore: id_product_store,
+            idStore: id_store,
+            idVirtual: id_virtual,
+            start: start_date,
+            end: end_date,
+            locale: apiLocale(language ?? "en"),
+            customer: {
+              firstName: customer.first_name,
+              lastName: customer.last_name,
+              email: customer.email,
+              phone: customer.phone,
+              prefix: customer.phone_prefix,
+              country: customer.country,
+            },
+            newsletter,
+            comments,
+          });
+
+          if (r.fallbackDeeplink) {
+            return jsonResult(
+              "Aquest proveïdor necessita el checkout complet de la web. Fes servir el 'booking_link' de search_mobility_rentals.",
+              { created: false, fallback_deeplink: true },
+            );
+          }
+          if (!r.ok) {
+            return errResult(`No s'ha pogut crear la reserva (${r.status}): ${r.error ?? "error desconegut"}`);
+          }
+
+          return jsonResult(
+            `Reserva creada (hold ${r.increment_id}). Enllaç de pagament: ${r.urlTpv}. ` +
+              `L'usuari paga ${r.pay_now} ara` +
+              (r.pay_at_pickup ? ` i ${r.pay_at_pickup} a la recollida a botiga` : "") +
+              `. Presenta-li l'enllaç i el desglossament.`,
+            {
+              created: true,
+              increment_id: r.increment_id,
+              payment_link: r.urlTpv,
+              total: r.total,
+              pay_now: r.pay_now,
+              pay_at_pickup: r.pay_at_pickup,
+              prepayment_percent: r.prepayment_pct,
+              free_cancellation_until: r.free_cancellation_until,
+              note:
+                "El pagament el completa l'usuari a payment_link. La reserva pot quedar pendent de confirmació del punt de recollida.",
+            },
+          );
+        } catch (e) {
+          return errResult(`Error creant la reserva: ${(e as Error).message}`);
+        }
+      },
+    );
+  }
 }

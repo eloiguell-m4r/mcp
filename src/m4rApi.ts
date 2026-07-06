@@ -223,6 +223,113 @@ export function normalizeDetails(raw: any): DetallProducto | null {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Booking headless (Fase 3A): POST {checkoutBaseUrl}/ai/checkout al WEB PHP.
+// El web recalcula el preu via /details i crea el hold + la Stripe session.
+// Aquí NO s'envia cap import: el caller només passa ids + dates + PII.
+// ---------------------------------------------------------------------------
+const BOOKING_TIMEOUT_MS = 30_000; // /details (pesat) + /order + Stripe, possiblement cross-regió
+
+export interface BookingCustomer {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  prefix?: string;
+  country: string;
+}
+
+export interface CreateBookingArgs {
+  idProductStore: number; // primer segment de /details (search retorna id_product_store)
+  idStore: number;
+  idVirtual: number;
+  start: string;
+  end: string;
+  sh?: string;
+  eh?: string;
+  locale: string;
+  customer: BookingCustomer;
+  newsletter?: boolean;
+  comments?: string;
+}
+
+export interface BookingResult {
+  ok: boolean;
+  /** El supplier requereix el checkout complet (diferit/split) → cal fallback al deep-link. */
+  fallbackDeeplink?: boolean;
+  status: number;
+  increment_id?: string;
+  urlTpv?: string;
+  total?: number;
+  pay_now?: number;
+  pay_at_pickup?: number;
+  prepayment_pct?: number;
+  free_cancellation_until?: string | null;
+  error?: string;
+}
+
+export async function createBooking(
+  checkoutBaseUrl: string,
+  secret: string,
+  a: CreateBookingArgs,
+): Promise<BookingResult> {
+  const body = {
+    id_product: a.idProductStore,
+    id_store: a.idStore,
+    id_virtual: a.idVirtual,
+    start: a.start,
+    end: a.end,
+    sh: a.sh && /^\d{3,4}$/.test(a.sh) ? a.sh : "1000",
+    eh: a.eh && /^\d{3,4}$/.test(a.eh) ? a.eh : "1000",
+    locale: a.locale,
+    customer: {
+      firstName: a.customer.firstName,
+      lastName: a.customer.lastName,
+      email: a.customer.email,
+      phone: a.customer.phone,
+      prefix: a.customer.prefix ?? "",
+      country: a.customer.country,
+    },
+    newsletter: a.newsletter ? 1 : 0,
+    comments: a.comments ?? "",
+  };
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), BOOKING_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${checkoutBaseUrl}/ai/checkout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${secret}`,
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (res.status === 409 && json?.status === "fallback_deeplink") {
+      return { ok: false, fallbackDeeplink: true, status: 409, error: json?.error };
+    }
+    if (!res.ok || !json?.urlTpv) {
+      return { ok: false, status: res.status, error: json?.error ?? `HTTP ${res.status}` };
+    }
+    return {
+      ok: true,
+      status: res.status,
+      increment_id: json.increment_id,
+      urlTpv: json.urlTpv,
+      total: json.total,
+      pay_now: json.pay_now,
+      pay_at_pickup: json.pay_at_pickup,
+      prepayment_pct: json.prepayment_pct,
+      free_cancellation_until: json.free_cancellation_until ?? null,
+    };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function getDetails(apiBase: string, a: DetailsArgs): Promise<DetallProducto | null> {
   const sh = a.sh && /^\d{3,4}$/.test(a.sh) ? a.sh : "1000";
   const eh = a.eh && /^\d{3,4}$/.test(a.eh) ? a.eh : "1000";

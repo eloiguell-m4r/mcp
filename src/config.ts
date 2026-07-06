@@ -21,6 +21,13 @@ export const config = {
   /** Base de la web pública per als deep-links. */
   webBaseUrl: env("WEB_BASE_URL", "https://www.motion4rent.com").replace(/\/+$/, ""),
   tenant: env("TENANT", "motion4rent"),
+  /**
+   * Base del WEB que exposa POST /ai/checkout (booking headless, Fase 3A).
+   * Buit = booking deshabilitat (només descoberta + deep-link).
+   */
+  checkoutBaseUrl: (process.env.M4R_CHECKOUT_BASE_URL ?? "").trim().replace(/\/+$/, ""),
+  /** Secret bearer compartit amb el web (AI_CHECKOUT_SECRET). */
+  checkoutSecret: (process.env.M4R_CHECKOUT_SECRET ?? "").trim(),
 };
 
 export type AppConfig = typeof config;
