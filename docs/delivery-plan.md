@@ -35,11 +35,19 @@ Preu pla `details.delivery_price`, sumat a `$total` (comissionat, com payAction 
 
 **Nota:** el `hotelReservation` (flag de programa hotel-partner) NO es toca; per a hotel només es desa `nameHotelReservation` (informatiu) + `delivery_address`.
 
-### Fase B — Aeroport (`5`)
-`get_rental_details`/nova tool exposa `airports_list` (nom + preu). `create_booking` accepta `delivery_type=5` + `airport_place_id` (millor que el nom, per evitar el match fràgil per string — ⚠️ verificar si payAction pot casar per place_id en lloc del nom) + `flight_number`. El servidor tria el preu de l'aeroport.
+### Fase B — Aeroport (`5`) — ✅ FET
+- ✅ **Selecció per `place_id`** (robust; payAction casa per nom, però al headless controlem el match → usem `place_id` d'`airports_list` i produïm el mateix preu). `flight_number` normalitzat (`strtoupper`, alfanumèric), obligatori.
+- ✅ **MCP:** `get_rental_details` exposa `airports: [{place_id, name, price}]` (preu convertit si `currency`; buit si `airport_delivery=0`). `create_booking` accepta `delivery_type=5` + `airport_place_id` + `flight_number`.
+- ✅ **Web:** `AiCheckoutController` accepta delivery 5; busca l'aeroport per `place_id` dins `details.airports_list` (si no → 400 `airport_not_available`); `flight_number` buit → 400; `deliveryPrice = airport.price × rate`; `deliveryAddress` = nom aeroport (locale); `flight_number` desat (línia 373, ja no forçat a '').
+- ✅ **e2e (Docker, Sevilla):** Nuremberg (place_id …2903, 3€) + vol → total 13; hold `delivery=5`/`delivery_address="Aeropuerto de Núremberg"`/`delivery_price=3`/`flight_number=FR1234`; Barcelona (10€)+USD → 24.44; sense vol → 400; place_id fals → 400.
+- ✅ **Fix de float:** la resposta arrodoneix `total`/`pay_now`/`pay_at_pickup` a la moneda (el soroll de float de la conversió es veia com 24.4399…; Stripe ja cobrava bé perquè `toStripeAmount` fa `round`).
 
-### Fase C — Creuer (`3`), event (`4`), `closed_service`
-Casos vora: recàrrec `closed_service`/`closed_price` (L1834, L1917), `deliveryPriceIncluded`, `delivery_hotel_on_closed`. Deixar per al final.
+### Fase C — Creuer (`3`), event (`4`), `closed_service` — ✅ FET
+- ✅ **Creuer (`3`):** es valora igual que ciutat (`delivery_price`, id_virtual==0, delivery_address = port/moll). Afegit a la branca de ciutat i a l'override. Verificat e2e: total 11; sense adreça → 400.
+- ✅ **Event (`4`): NO suportat (intencional).** És el flux de reserva d'esdeveniment (query `event=1`, `landing=event`), que el MCP no fa (sempre `event=0`). Es rebutja amb 400 `delivery_not_supported`. Verificat.
+- ✅ **`closed_service`: cap acció necessària (no és risc).** El recàrrec `delivery_closed_price`/`pickup_closed_price` (payAction L1913-1930) **NO s'afegeix a `$total`/`$pay`** — és una columna separada a `sales_order` (order.js:942), no forma part del cobrament Stripe. A més, només es fixa quan es passa `closed_service=1` a `/details`, i el flux headless passa sempre `0`. El builder els deixa null (open-service) → cap infravaloració del pagament.
+
+## Estat delivery: A + B + C FETES. Codis suportats: 0 pickup, 1 domicili, 2 hotel, 3 creuer, 5 aeroport. (4 event fora d'abast.)
 
 ## Preguntes obertes (verificar en implementar)
 - El `deliveryPrice` va **només a `$total`** (i es comissiona) o també a `priceProduct`/`deliveryPriceIncluded`? Mirar L1834-1835 i el bloc de fees.

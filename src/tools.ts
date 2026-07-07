@@ -242,6 +242,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               detail.city_delivery_price != null
                 ? Math.round(detail.city_delivery_price * rate * 100) / 100
                 : detail.city_delivery_price,
+            airports: detail.airports.map((a) => ({
+              ...a,
+              price: a.price != null ? Math.round(a.price * rate * 100) / 100 : a.price,
+            })),
             currency: target,
             deposit_currency: src,
             price_note: `Preu convertit a ${target} (rate de la plataforma). La fiança (${detail.deposit ?? 0}) es reté en ${src}. Import exacte confirmat en reservar.`,
@@ -368,8 +372,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           "Abans de cridar-la, DEMANA el consentiment de l'usuari i les seves dades (nom, cognoms, email, telèfon amb prefix, país). " +
           "Usa els identificadors obtinguts de search_mobility_rentals. El servidor recalcula el preu (no l'enviïs tu). Segons el proveïdor, " +
           "l'usuari pot pagar un DIPÒSIT ara i la resta a la recollida: comunica-li el desglossament (pay_now / pay_at_pickup). Algunes " +
-          "reserves queden pendents de confirmació. Si la resposta indica fallback (el proveïdor requereix el checkout complet) o si " +
-          "l'usuari vol lliurament a AEROPORT/creuer, usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
+          "reserves queden pendents de confirmació. Si la resposta indica fallback (el proveïdor requereix el checkout complet), " +
+          "usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
         inputSchema: {
           id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
           id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
@@ -398,20 +402,28 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           delivery_type: z
             .number()
             .optional()
-            .describe("Lliurament: 0 (o omès) recollida a botiga (gratis), 1 domicili/apartament, 2 hotel (ambdós a la ciutat). Aeroport/creuer NO suportats aquí."),
+            .describe("Lliurament: 0 (o omès) recollida a botiga (gratis), 1 domicili, 2 hotel, 3 creuer (ciutat), 5 aeroport."),
           delivery_address: z
             .string()
             .optional()
-            .describe("Adreça de lliurament. OBLIGATÒRIA si delivery_type és 1 o 2."),
+            .describe("Adreça/punt de lliurament (per creuer: port/moll). OBLIGATÒRIA si delivery_type és 1, 2 o 3."),
           hotel_name: z
             .string()
             .optional()
             .describe("Nom de l'hotel (opcional, si delivery_type és 2)."),
+          airport_place_id: z
+            .string()
+            .optional()
+            .describe("place_id de l'aeroport (de get_rental_details.airports). OBLIGATORI si delivery_type és 5."),
+          flight_number: z
+            .string()
+            .optional()
+            .describe("Nº de vol. OBLIGATORI si delivery_type és 5."),
           newsletter: z.boolean().optional().describe("Consentiment de newsletter. Opcional."),
           comments: z.string().optional().describe("Comentaris per a la botiga. Opcional."),
         },
       },
-      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, currency, options_id, delivery_type, delivery_address, hotel_name, newsletter, comments }) => {
+      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, currency, options_id, delivery_type, delivery_address, hotel_name, airport_place_id, flight_number, newsletter, comments }) => {
         try {
           const r = await createBooking(config.checkoutBaseUrl, config.checkoutSecret, {
             idProductStore: id_product_store,
@@ -435,6 +447,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             deliveryType: delivery_type,
             deliveryAddress: delivery_address,
             hotelName: hotel_name,
+            airportPlaceId: airport_place_id,
+            flightNumber: flight_number,
           });
 
           if (r.fallbackDeeplink) {
