@@ -17,6 +17,8 @@ import {
   getActiveCurrencies,
   getExchangeRate,
   getProductOptions,
+  productImageUrl,
+  storeMapUrl,
 } from "./m4rApi.js";
 import { findPolicies } from "./knowledge/policies.js";
 
@@ -167,22 +169,30 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         }
 
         const truncated = search.productos.length > MAX_PRODUCTS;
+        const productsOut = productos.map((p) => ({
+          ...p,
+          image_url: productImageUrl(config.productImageBase, p.image),
+        }));
         const summary =
           search.number > 0
-            ? `Hi ha ${search.number} opció(ns) a ${name} (${start_date} → ${end_date}). ` +
+            ? `Motion4Rent té ${search.number} opció(ns) de lloguer a ${name} (${start_date} → ${end_date}). ` +
               `Mostro ${productos.length}${truncated ? " (retallat)" : ""}. Enllaç per reservar: ${bookingLink}`
-            : `Sense disponibilitat a ${name} per a aquestes dates. Enllaç per revisar/altres dates: ${bookingLink}`;
+            : `Motion4Rent no té disponibilitat a ${name} per a aquestes dates. Enllaç per revisar/altres dates: ${bookingLink}`;
 
         return jsonResult(summary, {
+          provider: "Motion4Rent",
           city: name,
           country: place.country,
           dates: { start: start_date, end: end_date },
           available: search.number > 0,
           count: search.number,
-          products: productos,
+          products: productsOut,
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
-          note: "El pagament i el lliurament es completen a la web (booking_link). Aquesta tool no crea comandes.",
+          note:
+            "Aquests lloguers els ofereix MOTION4RENT. Mostra la foto (image_url) i el nom; NO mostris els ids interns " +
+            "(id_product_store/id_store) a l'usuari. Per al detall complet (botiga+mapa, lliurament, extres) crida " +
+            "get_rental_details amb aquests ids. El pagament es fa a la web o amb create_booking.",
           truncated,
         });
       } catch (e) {
@@ -197,8 +207,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     {
       title: "Detall d'un producte de lloguer",
       description:
-        "Retorna el detall d'un producte concret (specs, preu, extres, política de cancel·lació) a partir dels " +
-        "identificadors obtinguts de search_mobility_rentals.",
+        "Retorna el detall COMPLET d'un producte de MOTION4RENT: preu, fiança, foto (image_url), la botiga " +
+        "(nom + enllaç de mapa 'map_url'), TOTS els tipus de lliurament DISPONIBLES per a AQUEST producte (amb preu) " +
+        "i les opcions/extres. IMPORTANT: presenta a l'usuari el NOM de la botiga i el map_url; NO mostris mai els " +
+        "identificadors interns (id_store, id_product_store). Ofereix només els delivery_options que retorna (la resta " +
+        "no els admet aquest article). Usa els ids obtinguts de search_mobility_rentals.",
       inputSchema: {
         id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
         id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
@@ -214,14 +227,17 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     },
     async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency }) => {
       try {
-        const detail = await getDetails(config.apiBaseUrl, {
-          idProductStore: id_product_store,
-          idStore: id_store,
-          idVirtual: id_virtual,
-          start: start_date,
-          end: end_date,
-          locale: apiLocale(language ?? "en"),
-        });
+        const [detail, options] = await Promise.all([
+          getDetails(config.apiBaseUrl, {
+            idProductStore: id_product_store,
+            idStore: id_store,
+            idVirtual: id_virtual,
+            start: start_date,
+            end: end_date,
+            locale: apiLocale(language ?? "en"),
+          }),
+          getProductOptions(config.apiBaseUrl, id_product_store).catch(() => []),
+        ]);
         if (!detail) {
           return jsonResult("No s'ha trobat el detall d'aquest producte per a aquestes dates.", {
             found: false,
@@ -229,31 +245,67 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           });
         }
 
-        // Conversió del preu a la moneda demanada (mateix 'rate' que el booking). La fiança NO es converteix
-        // (el web tampoc la converteix: la preautorització es reté en la moneda del proveïdor).
+        // Moneda: converteix amb el mateix 'rate' que el booking (1 si no es demana o és la mateixa).
+        // La fiança NO es converteix (la preautorització es reté en la moneda del proveïdor).
         const target = (currency ?? "").trim().toUpperCase();
         const src = (detail.currency ?? "EUR").toUpperCase();
-        if (target && detail.price_total != null && src !== target) {
-          const rate = await getExchangeRate(config.apiBaseUrl, src, target);
-          const out = {
-            ...detail,
-            price_total: Math.round(detail.price_total * rate * 100) / 100,
-            city_delivery_price:
-              detail.city_delivery_price != null
-                ? Math.round(detail.city_delivery_price * rate * 100) / 100
-                : detail.city_delivery_price,
-            airports: detail.airports.map((a) => ({
-              ...a,
-              price: a.price != null ? Math.round(a.price * rate * 100) / 100 : a.price,
-            })),
-            currency: target,
-            deposit_currency: src,
-            price_note: `Preu convertit a ${target} (rate de la plataforma). La fiança (${detail.deposit ?? 0}) es reté en ${src}. Import exacte confirmat en reservar.`,
-          };
-          return jsonResult(`Detall de "${detail.name ?? "producte"}" (preus en ${target}).`, out);
+        const rate = target && src !== target ? await getExchangeRate(config.apiBaseUrl, src, target) : 1;
+        const displayCurrency = rate !== 1 ? target : src;
+        const conv = (v: number | null) => (v == null ? null : Math.round(v * rate * 100) / 100);
+
+        // Tipus de lliurament REALMENT disponibles per aquest producte (només els que admet).
+        const cityPrice = conv(detail.city_delivery_price) ?? 0;
+        const deliveryOptions: any[] = [{ delivery_type: 0, label: "Recollida a botiga", price: 0, free: true }];
+        if (detail.delivery_available) {
+          deliveryOptions.push({ delivery_type: 1, label: "Lliurament a domicili", price: cityPrice, needs: ["delivery_address"] });
+          deliveryOptions.push({ delivery_type: 2, label: "Lliurament a hotel", price: cityPrice, needs: ["delivery_address", "hotel_name?"] });
+        }
+        if (detail.cruise_available) {
+          deliveryOptions.push({ delivery_type: 3, label: "Lliurament a creuer", price: cityPrice, needs: ["delivery_address"] });
+        }
+        if (detail.airports.length) {
+          deliveryOptions.push({
+            delivery_type: 5,
+            label: "Lliurament a aeroport",
+            airports: detail.airports.map((a) => ({ place_id: a.place_id, name: a.name, price: conv(a.price) })),
+            needs: ["airport_place_id", "flight_number"],
+          });
         }
 
-        return jsonResult(`Detall de "${detail.name ?? "producte"}".`, detail);
+        const out = {
+          provider: "Motion4Rent",
+          product: {
+            name: detail.name,
+            type: detail.type,
+            image_url: productImageUrl(config.productImageBase, detail.image),
+          },
+          price: {
+            currency: displayCurrency,
+            total: conv(detail.price_total),
+            deposit: detail.deposit,
+            deposit_currency: src,
+            prepayment_percent: detail.prepayment_percent,
+            discount_percent: detail.discount_percent,
+          },
+          store: { name: detail.store_name, map_url: storeMapUrl(detail.store_place_id, detail.store_name) },
+          delivery_options: deliveryOptions,
+          options: options.map((o) => ({
+            id: o.id,
+            name: o.name,
+            price: conv(o.price),
+            price_basis: o.type === 1 ? "fix" : "per_dia",
+          })),
+          cancellation: detail.cancellation,
+          days: detail.days,
+          note:
+            "Presenta el NOM de la botiga i el map_url a l'usuari; NO mostris ids interns. Ofereix només aquests " +
+            "delivery_options. El total final (amb lliurament/opcions/moneda) el recalcula el servidor en reservar.",
+        };
+        return jsonResult(
+          `Motion4Rent — "${detail.name ?? "producte"}" a ${detail.store_name ?? "la botiga"} (preus en ${displayCurrency}). ` +
+            `${deliveryOptions.length} opció(ns) de lliurament, ${out.options.length} extra(s).`,
+          out,
+        );
       } catch (e) {
         return errResult(`Error obtenint el detall: ${(e as Error).message}`);
       }

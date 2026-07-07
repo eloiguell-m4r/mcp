@@ -28,6 +28,10 @@ export const config = {
   checkoutBaseUrl: (process.env.M4R_CHECKOUT_BASE_URL ?? "").trim().replace(/\/+$/, ""),
   /** Secret bearer compartit amb el web (AI_CHECKOUT_SECRET). */
   checkoutSecret: (process.env.M4R_CHECKOUT_SECRET ?? "").trim(),
+  /** Base CDN (CloudFront) per a les imatges de producte: {base}/{filename}. Amplada w800 per defecte. */
+  productImageBase: (process.env.PRODUCT_IMAGE_BASE ?? "https://d3alzpqy0fqlq2.cloudfront.net/products/cache/w800")
+    .trim()
+    .replace(/\/+$/, ""),
 };
 
 export type AppConfig = typeof config;

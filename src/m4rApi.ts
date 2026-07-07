@@ -232,14 +232,36 @@ export interface DetallProducto {
   discount_percent: number | null;
   deposit: number | null; // fiança reembolsable (data[0].bail); null si no n'hi ha
   city_delivery_price: number | null; // preu pla de lliurament a ciutat (details.delivery_price); 0/null = pickup gratis
+  delivery_available: boolean; // details.delivery>0 → admet domicili/hotel
+  cruise_available: boolean; // details.cruises>0 → admet lliurament a creuer
   airports: Array<{ place_id: string; name: string; price: number | null }>; // lliurament a aeroport (buit si no n'hi ha)
+  store_name: string | null; // nom de la botiga (per presentar; MAI l'id intern)
+  store_place_id: string | null; // per construir l'enllaç de mapa
+  image: string | null; // filename (usar productImageUrl per a la URL pública)
   cancellation: {
     name: string | null;
     days: number | null;
     refundable: number | null;
     percent: number | null;
   };
-  image: string | null;
+}
+
+/** URL pública (CDN) d'una imatge de producte a partir del filename de /details. null si buit. */
+export function productImageUrl(base: string, filename: string | null | undefined): string | null {
+  const f = (filename ?? "").trim();
+  if (f === "") return null;
+  const clean = f.replace(/^\/+/, "");
+  return `${base}/${clean}`;
+}
+
+/** Enllaç de Google Maps de la botiga (per place_id; fallback a cerca per nom). null si no hi ha res. */
+export function storeMapUrl(placeId: string | null | undefined, name: string | null | undefined): string | null {
+  const pid = (placeId ?? "").trim();
+  if (pid !== "") {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name ?? "store")}&query_place_id=${encodeURIComponent(pid)}`;
+  }
+  const n = (name ?? "").trim();
+  return n !== "" ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(n)}` : null;
 }
 
 function num(v: unknown): number | null {
@@ -271,6 +293,10 @@ export function normalizeDetails(raw: any): DetallProducto | null {
     discount_percent: num(d.percent_discount),
     deposit: num(d.bail),
     city_delivery_price: num(p.delivery_price),
+    delivery_available: (num(p.delivery) ?? 0) > 0,
+    cruise_available: (num(p.cruises) ?? 0) > 0,
+    store_name: (body?.store?.name ?? null) || null,
+    store_place_id: (body?.store?.place_id ?? null) || null,
     airports:
       num(p.airport_delivery) && Array.isArray(p.airports_list)
         ? p.airports_list.map((a: any) => ({
