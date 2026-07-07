@@ -8,8 +8,13 @@ Decisions: host = servidor co-ubicat amb l'API read-only (`M4R_API_BASE_URL=http
 - ✅ vhost intern `127.0.0.1:8090` (bypass Cloudflare per a `/ai/checkout`) — verificat 401/400.
 - ✅ vhost públic `mcp.motion4rent.com` (proxy nginx → :8787) + DNS **A record** proxied.
 - ✅ Tenants: `:3000` motion4rent-api, `:3001` rent4riders-api.
-- ⏳ **PENDENT: eximir `mcp.motion4rent.com` del managed challenge de Cloudflare** (secció 6) → sense això el connector de Claude/ChatGPT rep el repte "Just a moment…" i falla.
-- ⏳ Registrar el connector (secció 7) i provar reserva real (secció 8), encara en Stripe TEST.
+- ✅ **Cloudflare WAF Custom Rule "Skip"** per `http.host eq mcp.motion4rent.com` (Super Bot Fight Mode + Browser Integrity + Security Level + Managed rules) → sense el "Just a moment…".
+- ✅ **Cloudflare Configuration Rule** SSL=**Flexible** per `mcp.motion4rent.com` (l'origen només té :80; sense això → error 521). NO túnel.
+- ✅ **Verificat des de fora**: `https://mcp.motion4rent.com/health` → 200 JSON; `POST /mcp` sense token → 401.
+- ⏳ Verificar tools (create_booking) via MCP Inspector HTTP + bearer, i **registrar el connector** a Claude/ChatGPT (secció 7).
+- ⏳ Reserva real de prova (Sevilla, supplier id=1, divendres 23-23h) — encara Stripe TEST — abans de passar a LIVE (secció 8).
+
+> Nota seguretat: SSL Flexible deixa el tram Cloudflare→origen (:80) sense xifrar (hi passa el bearer). Per endurir-ho més endavant: Cloudflare Tunnel o Origin Certificate al host + tornar a Full.
 
 ## 0) Prerequisits al host de Virgínia
 - **Node 22+**: `node -v` (el server demana >=20; recomanat 22).

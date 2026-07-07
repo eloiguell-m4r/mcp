@@ -154,6 +154,37 @@ export async function searchResults(apiBase: string, a: SearchArgs): Promise<Sea
   return { number: Number(body?.number ?? productos.length), productos, typesProducts };
 }
 
+// ---------------------------------------------------------------------------
+// Moneda (dinàmica): la font de veritat és la taula exchange_rates de l'API.
+// getActiveCurrencies → llista de monedes disponibles (si demà se n'afegeix una
+// a exchange_rates, apareix aquí sense tocar codi). getExchangeRate → mateix
+// 'rate' que fa servir el web a exchange() (coherent amb el que cobra el booking).
+// ---------------------------------------------------------------------------
+
+/** Monedes actives de la plataforma (de /exchange/rates-to-eur). EUR sempre primer. */
+export async function getActiveCurrencies(apiBase: string): Promise<string[]> {
+  const body = unwrapBody(await getJson(`${apiBase}/exchange/rates-to-eur`, DEFAULT_TIMEOUT_MS));
+  const map = body && typeof body === "object" && body.data && typeof body.data === "object" ? body.data : {};
+  const codes = Object.keys(map).map((c) => c.toUpperCase());
+  return ["EUR", ...codes.filter((c) => c !== "EUR").sort()];
+}
+
+/** Rate de conversió from→to (mateix 'rate' que el web a exchange()). 1 si from==to o error. */
+export async function getExchangeRate(apiBase: string, from: string, to: string): Promise<number> {
+  const f = from.toUpperCase();
+  const t = to.toUpperCase();
+  if (f === t) return 1;
+  try {
+    const body = unwrapBody(
+      await getJson(`${apiBase}/exchange/${encodeURIComponent(f)}/${encodeURIComponent(t)}/1`, DEFAULT_TIMEOUT_MS),
+    );
+    const rate = Number(body);
+    return Number.isFinite(rate) && rate > 0 ? rate : 1;
+  } catch {
+    return 1;
+  }
+}
+
 export interface DetailsArgs {
   idProductStore: number;
   idStore: number;
@@ -251,6 +282,8 @@ export interface CreateBookingArgs {
   customer: BookingCustomer;
   newsletter?: boolean;
   comments?: string;
+  /** Moneda demanada per l'usuari (una d'actives). Buit = moneda del producte. El web valida + converteix. */
+  currency?: string;
 }
 
 export interface BookingResult {
@@ -292,6 +325,7 @@ export async function createBooking(
     },
     newsletter: a.newsletter ? 1 : 0,
     comments: a.comments ?? "",
+    currency: (a.currency ?? "").toUpperCase(),
   };
 
   const ctrl = new AbortController();

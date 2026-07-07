@@ -8,7 +8,15 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AppConfig } from "./config.js";
 import { buildResultsLink, slugCiudad } from "./deeplink.js";
-import { apiLocale, geocodeCity, searchResults, getDetails, createBooking } from "./m4rApi.js";
+import {
+  apiLocale,
+  geocodeCity,
+  searchResults,
+  getDetails,
+  createBooking,
+  getActiveCurrencies,
+  getExchangeRate,
+} from "./m4rApi.js";
 import { findPolicies } from "./knowledge/policies.js";
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data en format YYYY-MM-DD");
@@ -83,9 +91,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           .optional()
           .describe("Codi de país ISO alpha-2 (p. ex. 'es') per desambiguar ciutats homònimes. Opcional."),
         language: z.string().optional().describe("Idioma del client (en, es, fr, de, it, nl, pt...). Per defecte 'en'."),
+        currency: z
+          .string()
+          .optional()
+          .describe("Moneda per mostrar els preus (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte."),
       },
     },
-    async ({ city, start_date, end_date, product_type, country, language }) => {
+    async ({ city, start_date, end_date, product_type, country, language, currency }) => {
       try {
         const lang = language ?? "en";
         const geo = await geocodeCity(config.apiBaseUrl, city);
@@ -134,6 +146,25 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         });
 
         const productos = search.productos.slice(0, MAX_PRODUCTS);
+
+        // Conversió de preus a la moneda demanada (mateix 'rate' que el web; el booking recalcula igual).
+        const target = (currency ?? "").trim().toUpperCase();
+        if (target) {
+          const rateCache = new Map<string, number>();
+          for (const p of productos) {
+            const src = (p.currency ?? "EUR").toUpperCase();
+            if (p.total != null && src !== target) {
+              let rate = rateCache.get(src);
+              if (rate === undefined) {
+                rate = await getExchangeRate(config.apiBaseUrl, src, target);
+                rateCache.set(src, rate);
+              }
+              p.total = Math.round(p.total * rate * 100) / 100;
+            }
+            p.currency = target;
+          }
+        }
+
         const truncated = search.productos.length > MAX_PRODUCTS;
         const summary =
           search.number > 0
@@ -174,9 +205,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         start_date: DATE.describe("Data d'inici (YYYY-MM-DD)"),
         end_date: DATE.describe("Data de fi (YYYY-MM-DD)"),
         language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'."),
+        currency: z
+          .string()
+          .optional()
+          .describe("Moneda per mostrar els preus (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte."),
       },
     },
-    async ({ id_product_store, id_store, id_virtual, start_date, end_date, language }) => {
+    async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency }) => {
       try {
         const detail = await getDetails(config.apiBaseUrl, {
           idProductStore: id_product_store,
@@ -192,9 +227,50 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             id_product_store,
           });
         }
+
+        // Conversió del preu a la moneda demanada (mateix 'rate' que el booking). La fiança NO es converteix
+        // (el web tampoc la converteix: la preautorització es reté en la moneda del proveïdor).
+        const target = (currency ?? "").trim().toUpperCase();
+        const src = (detail.currency ?? "EUR").toUpperCase();
+        if (target && detail.price_total != null && src !== target) {
+          const rate = await getExchangeRate(config.apiBaseUrl, src, target);
+          const out = {
+            ...detail,
+            price_total: Math.round(detail.price_total * rate * 100) / 100,
+            currency: target,
+            deposit_currency: src,
+            price_note: `Preu convertit a ${target} (rate de la plataforma). La fiança (${detail.deposit ?? 0}) es reté en ${src}. Import exacte confirmat en reservar.`,
+          };
+          return jsonResult(`Detall de "${detail.name ?? "producte"}" (preus en ${target}).`, out);
+        }
+
         return jsonResult(`Detall de "${detail.name ?? "producte"}".`, detail);
       } catch (e) {
         return errResult(`Error obtenint el detall: ${(e as Error).message}`);
+      }
+    },
+  );
+
+  // 3b) MONEDES actives (dinàmic). Perquè l'assistent pugui oferir/demanar la moneda a l'usuari.
+  server.registerTool(
+    "list_currencies",
+    {
+      title: "Monedes disponibles",
+      description:
+        "Retorna les monedes en què l'usuari pot veure preus i pagar (llista dinàmica de la plataforma). " +
+        "Usa-la per DEMANAR a l'usuari en quina moneda vol els preus i la reserva, i passa la triada com a 'currency' " +
+        "a search_mobility_rentals / get_rental_details / create_booking. Si no s'indica, s'usa la moneda del producte.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const currencies = await getActiveCurrencies(config.apiBaseUrl);
+        return jsonResult(
+          `Monedes disponibles: ${currencies.join(", ")}. Pregunta a l'usuari quina vol i passa-la com a 'currency'.`,
+          { currencies, default: "moneda del producte si no se n'indica cap" },
+        );
+      } catch (e) {
+        return errResult(`Error obtenint les monedes: ${(e as Error).message}`);
       }
     },
   );
@@ -207,22 +283,31 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       description:
         "Respon preguntes generals sobre el servei: cancel·lació, fiança/dipòsit, procés i cost de lliurament, " +
         "cobertura, plegabilitat, pes/capacitat, transport públic/avió, assegurança, devolució i ciutats. " +
-        "Retorna els textos oficials (en espanyol; tradueix-los a l'idioma de l'usuari). Passa 'query' per filtrar; sense query, torna tot.",
+        "Els textos oficials estan en ESPANYOL (font de veritat): tradueix-los SEMPRE a l'idioma de l'usuari " +
+        "(passa 'language' amb aquest idioma). Passa 'query' per filtrar; sense query, torna tot.",
       inputSchema: {
         query: z
           .string()
           .optional()
           .describe("Pregunta o paraules clau (p. ex. 'cancelación', 'deposit', 'delivery to hotel'). Opcional."),
+        language: z
+          .string()
+          .optional()
+          .describe("Idioma de l'usuari (en, es, fr, de, it...). El text font ve en 'es'; tradueix-lo a aquest idioma."),
       },
     },
-    async ({ query }) => {
+    async ({ query, language }) => {
       const policies = findPolicies(query);
+      const lang = (language ?? "").trim();
+      const target = lang && !lang.toLowerCase().startsWith("es")
+        ? `Tradueix els textos (font 'es') a '${lang}' abans de respondre a l'usuari.`
+        : `Textos oficials en espanyol; tradueix-los a l'idioma de l'usuari.`;
       const summary = query
-        ? `${policies.length} política(es) rellevant(s) per a "${query}". Textos oficials en espanyol; tradueix a l'idioma del client.`
-        : `Totes les polítiques (${policies.length}). Textos oficials en espanyol; tradueix a l'idioma del client.`;
+        ? `${policies.length} política(es) rellevant(s) per a "${query}". ${target}`
+        : `Totes les polítiques (${policies.length}). ${target}`;
       return jsonResult(
         summary,
-        policies.map((p) => ({ topic: p.topic, title: p.title, text: p.text })),
+        policies.map((p) => ({ topic: p.topic, title: p.title, text: p.text, source_language: "es" })),
       );
     },
   );
@@ -259,11 +344,15 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             })
             .describe("Dades del client (amb consentiment)"),
           language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'."),
+          currency: z
+            .string()
+            .optional()
+            .describe("Moneda de pagament (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte. El servidor valida i recalcula."),
           newsletter: z.boolean().optional().describe("Consentiment de newsletter. Opcional."),
           comments: z.string().optional().describe("Comentaris per a la botiga. Opcional."),
         },
       },
-      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, newsletter, comments }) => {
+      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, currency, newsletter, comments }) => {
         try {
           const r = await createBooking(config.checkoutBaseUrl, config.checkoutSecret, {
             idProductStore: id_product_store,
@@ -282,6 +371,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             },
             newsletter,
             comments,
+            currency,
           });
 
           if (r.fallbackDeeplink) {
