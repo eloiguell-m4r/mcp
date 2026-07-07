@@ -359,12 +359,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         title: "Crea una reserva amb enllaç de pagament (recollida a botiga)",
         description:
           "Crea una reserva en estat 'hold' i retorna un ENLLAÇ DE PAGAMENT Stripe (urlTpv) que l'usuari obre per pagar. " +
-          "IMPORTANT: només per a RECOLLIDA A BOTIGA i SENSE extres/opcions. Abans de cridar-la, DEMANA el consentiment " +
+          "IMPORTANT: només per a RECOLLIDA A BOTIGA (sense lliurament). Opcionalment pots afegir opcions/extres amb " +
+          "'options_id' (IDs de list_product_options); el servidor en valora el preu. Abans de cridar-la, DEMANA el consentiment " +
           "de l'usuari i les seves dades (nom, cognoms, email, telèfon amb prefix, país). Usa els identificadors obtinguts " +
           "de search_mobility_rentals. El servidor recalcula el preu (no l'enviïs tu). Segons el proveïdor, l'usuari pot pagar " +
           "un DIPÒSIT ara i la resta a la recollida: comunica-li el desglossament (pay_now / pay_at_pickup). Algunes reserves " +
           "queden pendents de confirmació del punt de recollida. Si la resposta indica fallback (el proveïdor requereix el " +
-          "checkout complet) o si l'usuari vol lliurament/extres, usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
+          "checkout complet) o si l'usuari vol lliurament, usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
         inputSchema: {
           id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
           id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
@@ -386,11 +387,15 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             .string()
             .optional()
             .describe("Moneda de pagament (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte. El servidor valida i recalcula. [prova: USD]"),
+          options_id: z
+            .array(z.number())
+            .optional()
+            .describe("IDs d'opcions/extres a afegir (de list_product_options). El servidor en valora el preu. Opcional. [prova: [1710,1711]]"),
           newsletter: z.boolean().optional().describe("Consentiment de newsletter. Opcional."),
           comments: z.string().optional().describe("Comentaris per a la botiga. Opcional."),
         },
       },
-      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, currency, newsletter, comments }) => {
+      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, currency, options_id, newsletter, comments }) => {
         try {
           const r = await createBooking(config.checkoutBaseUrl, config.checkoutSecret, {
             idProductStore: id_product_store,
@@ -410,6 +415,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             newsletter,
             comments,
             currency,
+            optionsId: options_id,
           });
 
           if (r.fallbackDeeplink) {

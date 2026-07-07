@@ -308,6 +308,8 @@ export interface CreateBookingArgs {
   comments?: string;
   /** Moneda demanada per l'usuari (una d'actives). Buit = moneda del producte. El web valida + converteix. */
   currency?: string;
+  /** IDs d'opcions/extres a afegir (de /details/options). El web en valora el preu server-side. */
+  optionsId?: number[];
 }
 
 export interface BookingResult {
@@ -350,6 +352,7 @@ export async function createBooking(
     newsletter: a.newsletter ? 1 : 0,
     comments: a.comments ?? "",
     currency: (a.currency ?? "").toUpperCase(),
+    options_id: Array.isArray(a.optionsId) ? a.optionsId : [],
   };
 
   const ctrl = new AbortController();

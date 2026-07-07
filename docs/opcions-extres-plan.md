@@ -19,17 +19,21 @@ El preu de cada opció NO es confia del caller: es llegeix de la BD per ID. El c
 1. **Exposar la llista d'opcions:** ja existeix `GET /details/options/{id_product_store}` (`details.js:7-29`, registrat abans del catch-all). Retorna `{ number, response:[{id, name, price, type, id_store, id_supplier, image, ...}] }`. `id` = `product_options.id` (el que anirà a `options_id`); `type` 0/1 (1=fix, 0=×dies). Verificat: `559`→2 opcions (Elevating Leg Rest L/R, price 1, type 0), `8621`→1 (Basket).
    - **Decisió:** usar aquest endpoint dedicat des del MCP. NO modificar el `/details` principal (pesat i compartit amb el web de prod → risc innecessari).
 
-### motion4rent-web (`AiCheckoutController` + `AiOrderDataBuilder`)
-2. **Acceptar `options_id`** (array d'ints) al body de `/ai/checkout`; treure el rebuig `options_not_supported` (mantenir-lo per a `options` en text lliure no validat).
-3. **Carregar+valorar opcions (server-side):** per cada id, `GET /options/.../option/{id}/store/{id}`; si no existeix → ignorar (o 400). Convertir `price` amb `exchangeRate(productCurrency→$currency)` (ja tenim l'helper). Sumar amb `type==1` fix / else `× dies`.
-4. **Integrar al càlcul:** passar la suma d'opcions al builder (nou paràmetre `$optionsTotal`) i afegir-la a `$total` a l'inici de `build()`, ABANS del bloc de fees — mirall exacte de payAction. **`priceProduct` NO ha d'incloure opcions** (les opcions són línies a part); només `$total`/comissió/`pay`.
-5. **Persistir:** omplir `$data['options']` amb els objectes d'opció convertits (`name/price/image/type`) perquè `/order` els insereixi (ja ho fa).
-6. **Test:** estendre `AiOrderDataBuilderTest` amb un cas amb opcions, comparant els imports amb el que dona payAction (mateixa aritmètica).
+### motion4rent-web (`AiCheckoutController` + `AiOrderDataBuilder`) — ✅ FET
+2. ✅ **Accepta `options_id`** (array d'ints); només rebutja `options` en text lliure.
+3. ✅ **Carrega+valora server-side:** helper `fetchOption()` → `GET /options/product/{ips}/option/{id}/store/{is}`; si no existeix → **400 `option_not_available`**. Preu convertit amb el `rate` (reusat del bloc de moneda; 1 si mateixa moneda). `type==1` fix / else `× dies` (`$days` de `content->days`).
+4. ✅ **Integrat al càlcul:** builder amb nou 4t paràmetre `$optionsTotal` sumat a `$total` abans del bloc de fees. `priceProduct` NO inclou opcions. Verificat e2e: base 10 → +opcions(1710+1711, 1/dia, 2 dies) = 14; comissió inclou opcions.
+5. ✅ **Persisteix:** `$data['options']` amb `{id,name,price,image,type}`; `/order` (order.js:990) insereix a `sales_order_item` amb `type=1` (marca opció) i `typeOpt`=price-type. Verificat al hold.
+6. ✅ **Test:** `testOptionsAddToTotalNotPriceProduct` (4/4) — total 130, comissió inclou opcions, priceProduct 110 sense opcions.
 
-### webs/mcp
-7. **Descoberta d'opcions:** ✅ FET. `getProductOptions(apiBase, idProductStore)` a `m4rApi.ts` (crida `GET /details/options/{id}`) + tool **`list_product_options`** → `[{id, name, price, price_basis: fix|per_dia}]`. Preu en moneda del producte (nota que el total es recalcula en reservar); verificat: 559→2 opcions (Leg Rest L/R, 1/dia), 8621→1 (Basket, 1/dia).
-8. **`create_booking`:** ⏳ afegir paràmetre `options_id: number[]` (opcional). Descripció: "IDs de list_product_options; el servidor valida i recalcula el preu". Treure de la descripció el "SENSE extres/opcions".
-9. **Moneda:** el preu de l'opció al booking es converteix amb el mateix `rate` (server-side, pas web). A `list_product_options` no es converteix (informatiu; per no fer una crida extra a /details per saber la moneda del producte).
+### webs/mcp — ✅ FET
+7. ✅ **Descoberta:** `getProductOptions()` + tool `list_product_options` → `[{id, name, price, price_basis}]`. Verificat: 559→2 (Leg Rest L/R), 8621→1 (Basket).
+8. ✅ **`create_booking`:** paràmetre `options_id: number[]` opcional → enviat a `/ai/checkout`. Descripció actualitzada (treta la restricció "sense extres"; manté "sense lliurament"). E2e: total 14 amb `options_id:[1710,1711]`.
+9. ✅ **Moneda:** el preu de l'opció al booking es converteix amb el mateix `rate` (server-side). Verificat: opcions+USD → 17.1. A `list_product_options` no es converteix (informatiu).
+
+### ⏳ PENDENT
+- **Pas 5 — e2e amb pagament real (Stripe TEST):** pagar una reserva amb opcions (i una amb opcions+moneda) i confirmar que Stripe cobra el total compost i el webhook confirma. Baix risc (mateix camí que ja validat; la Stripe session ja es crea amb el total correcte). Fer-ho en `ENVIRONMENT=development`, NO a producció.
+- **Desplegar:** web per pipeline GitLab; MCP manual (`git pull`+`npm run build`+`restart`).
 
 ## e2e (Stripe TEST, entorn dev)
 - Producte de proves Sevilla + una opció → `total` = base + (opció fixa o ×dies), comissió recalculada, hold correcte, `body.options` inserides, i pagament TEST → webhook confirma. Provar també amb `currency` no-EUR (opció convertida).
