@@ -231,6 +231,7 @@ export interface DetallProducto {
   prepayment_percent: number | null;
   discount_percent: number | null;
   deposit: number | null; // fiança reembolsable (data[0].bail); null si no n'hi ha
+  city_delivery_price: number | null; // preu pla de lliurament a ciutat (details.delivery_price); 0/null = pickup gratis
   cancellation: {
     name: string | null;
     days: number | null;
@@ -268,6 +269,7 @@ export function normalizeDetails(raw: any): DetallProducto | null {
     prepayment_percent: num(d.prepayment),
     discount_percent: num(d.percent_discount),
     deposit: num(d.bail),
+    city_delivery_price: num(p.delivery_price),
     cancellation: {
       name: d.cancellation_name ?? null,
       days: num(d.cancellation_days),
@@ -310,6 +312,12 @@ export interface CreateBookingArgs {
   currency?: string;
   /** IDs d'opcions/extres a afegir (de /details/options). El web en valora el preu server-side. */
   optionsId?: number[];
+  /** Tipus de lliurament: 0/undefined recollida a botiga, 1 domicili, 2 hotel (a ciutat). */
+  deliveryType?: number;
+  /** Adreça de lliurament (obligatòria si deliveryType 1/2). */
+  deliveryAddress?: string;
+  /** Nom de l'hotel (opcional, si deliveryType 2). */
+  hotelName?: string;
 }
 
 export interface BookingResult {
@@ -353,6 +361,9 @@ export async function createBooking(
     comments: a.comments ?? "",
     currency: (a.currency ?? "").toUpperCase(),
     options_id: Array.isArray(a.optionsId) ? a.optionsId : [],
+    delivery: a.deliveryType ?? 0,
+    delivery_address: a.deliveryAddress ?? "",
+    hotel_name: a.hotelName ?? "",
   };
 
   const ctrl = new AbortController();

@@ -26,12 +26,14 @@ Expansió després d'opcions/moneda. Permetre triar **tipus de lliurament** (no 
 `AiOrderDataBuilder` fixa `delivery='0'`, `deliveryPrice=0`, `deliveryPriceIncluded=0`; `AiCheckoutController` rebutja `delivery` ∉ {0,pickup,''} amb `delivery_not_supported`, i posa `hotelReservation=''`, `flight_number` etc. a buit. Cal parametritzar-ho.
 
 ## Fases proposades
-### Fase A — Lliurament a ciutat (domicili `1` + hotel `2`) — RECOMANAT primer
-La més comuna i simple: preu pla `details.delivery_price`, sense match d'aeroport.
-- **MCP:** exposar `delivery_price` (i si cal disponibilitat) a `get_rental_details`; a `create_booking` afegir `delivery_type` (1|2) + `delivery_address` (+ `hotel_name` si 2). Treure de la descripció "només recollida".
-- **Web (`AiCheckoutController` + builder):** acceptar `delivery` 1/2; validar `delivery_price>0` i `id_virtual==0`; `deliveryPrice = exchange(details.delivery_price → $currency)`; sumar a `$total` (nou paràmetre builder `$deliveryPrice`, com `$optionsTotal`); omplir `delivery`, `delivery_address`, `deliveryPrice`, i (tipus 2) `hotelReservation=1`/`nameHotelReservation`. Validar camps requerits (adreça obligatòria; hotel → nom).
-- **Test:** estendre `AiOrderDataBuilderTest` amb un cas amb `deliveryPrice` (suma a total, no a priceProduct? verificar com ho fa payAction — sembla que sí suma a total i el comissiona; confirmar si va a priceProduct).
-- **e2e:** Sevilla + `delivery_type=1` + adreça → total = base + delivery_price; +USD; hold amb `delivery`/`delivery_address`/`delivery_price` correctes.
+### Fase A — Lliurament a ciutat (domicili `1` + hotel `2`) — ✅ FET
+Preu pla `details.delivery_price`, sumat a `$total` (comissionat, com payAction L1693), NO a `priceProduct`. Confirmat: `deliveryPrice` va a `$total` i es comissiona; `priceProduct` no l'inclou (payAction L1866).
+- ✅ **MCP:** `get_rental_details` exposa `city_delivery_price` (convertit si `currency`). `create_booking` accepta `delivery_type` (1|2) + `delivery_address` (+ `hotel_name` si 2). Descripció actualitzada.
+- ✅ **Web:** `AiCheckoutController` normalitza `deliveryType` (accepta 0/1/2; 3/4/5 → 400); city delivery valida `id_virtual==0` i `delivery_address` (si no → 400 `missing_fields`/`delivery_not_available`); `deliveryPrice = delivery_price × rate`; builder amb 5è param `$deliveryPrice`; omple `delivery`/`deliveryAddress`/`deliveryPrice`/`deliveryPriceIncluded` (+ `nameHotelReservation` per hotel).
+- ✅ **Test:** `testDeliveryPriceAddsToTotalNotPriceProduct` (5/5): total 118, comissió inclou delivery, priceProduct 110 sense delivery.
+- ✅ **e2e (Docker local, Sevilla):** pickup 10 → domicili(1)+adreça 11 (delivery_price 1, pla); hotel(2)+hotel_name 11; +USD 13.44; sense adreça → 400; **combo delivery+opcions = 15** (10+1+4); hold persisteix `delivery=1`/`delivery_address`/`delivery_price=1`.
+
+**Nota:** el `hotelReservation` (flag de programa hotel-partner) NO es toca; per a hotel només es desa `nameHotelReservation` (informatiu) + `delivery_address`.
 
 ### Fase B — Aeroport (`5`)
 `get_rental_details`/nova tool exposa `airports_list` (nom + preu). `create_booking` accepta `delivery_type=5` + `airport_place_id` (millor que el nom, per evitar el match fràgil per string — ⚠️ verificar si payAction pot casar per place_id en lloc del nom) + `flight_number`. El servidor tria el preu de l'aeroport.
