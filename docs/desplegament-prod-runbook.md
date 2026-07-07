@@ -2,6 +2,22 @@
 
 Decisions: host = servidor co-ubicat amb l'API read-only (`M4R_API_BASE_URL=http://localhost:3000`); reverse proxy = Cloudflare; secret = es reutilitza el de dev (`cf30…`).
 
+## Redesplegament (actualitzar codi ja desplegat)
+Dos repos, dos mecanismes:
+
+- **Web (`motion4rent-web`) → automàtic per pipeline de GitLab.** En fer `git push`, el pipeline desplega als **dos servidors** del web (i s'ocupa de l'opcache). No cal fer res manual al web.
+- **MCP (`/var/www/mcp`) → manual amb systemd** (no té pipeline):
+  ```bash
+  cd /var/www/mcp
+  git pull
+  npm ci            # només si han canviat package.json/lock; si no, salta'l
+  npm run build     # TS → dist/ (obligatori: el codi que corre és dist/)
+  sudo systemctl restart motion4rent-mcp   # el procés Node té dist/ en memòria; no es refresca sol
+  sudo systemctl status motion4rent-mcp --no-pager
+  curl -s localhost:8787/health            # → {"ok":true,...}
+  ```
+- **Ordre recomanat:** desplega **primer el web** (push) i **després el MCP**. Així, si el MCP nou envia un camp nou (p. ex. `currency`), el web ja el sap validar.
+
 ## ESTAT (2026-07-06): desplegat, falta 1 cosa
 - ✅ Codi clonat a `/var/www/mcp`, `npm ci && npm run build`, `.env` creat.
 - ✅ Servei **systemd `motion4rent-mcp` actiu** (`:8787`, `auth=on`), `/health` OK en local.

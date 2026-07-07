@@ -199,16 +199,16 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         "Retorna el detall d'un producte concret (specs, preu, extres, política de cancel·lació) a partir dels " +
         "identificadors obtinguts de search_mobility_rentals.",
       inputSchema: {
-        id_product_store: z.number().describe("id_product_store del resultat de cerca"),
-        id_store: z.number().describe("id_store del resultat de cerca"),
-        id_virtual: z.number().describe("id_virtual del resultat de cerca (0 si botiga física)"),
-        start_date: DATE.describe("Data d'inici (YYYY-MM-DD)"),
-        end_date: DATE.describe("Data de fi (YYYY-MM-DD)"),
-        language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'."),
+        id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
+        id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
+        id_virtual: z.number().describe("id_virtual del resultat de cerca (0 si botiga física). [prova: 0]"),
+        start_date: DATE.describe("Data d'inici (YYYY-MM-DD). [prova: 2026-07-24]"),
+        end_date: DATE.describe("Data de fi (YYYY-MM-DD). [prova: 2026-07-24]"),
+        language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'. [prova: es]"),
         currency: z
           .string()
           .optional()
-          .describe("Moneda per mostrar els preus (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte."),
+          .describe("Moneda per mostrar els preus (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte. [prova: USD]"),
       },
     },
     async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency }) => {
@@ -328,26 +328,26 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           "queden pendents de confirmació del punt de recollida. Si la resposta indica fallback (el proveïdor requereix el " +
           "checkout complet) o si l'usuari vol lliurament/extres, usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
         inputSchema: {
-          id_product_store: z.number().describe("id_product_store del resultat de cerca"),
-          id_store: z.number().describe("id_store del resultat de cerca"),
-          id_virtual: z.number().describe("id_virtual del resultat de cerca (0 si botiga física)"),
-          start_date: DATE.describe("Data d'inici (YYYY-MM-DD)"),
-          end_date: DATE.describe("Data de fi (YYYY-MM-DD)"),
+          id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
+          id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
+          id_virtual: z.number().describe("id_virtual del resultat de cerca (0 si botiga física). [prova: 0]"),
+          start_date: DATE.describe("Data d'inici (YYYY-MM-DD). [prova: 2026-07-24]"),
+          end_date: DATE.describe("Data de fi (YYYY-MM-DD). [prova: 2026-07-24]"),
           customer: z
             .object({
-              first_name: z.string().describe("Nom"),
-              last_name: z.string().describe("Cognoms"),
-              email: z.string().describe("Correu electrònic"),
-              phone: z.string().describe("Telèfon (sense prefix)"),
-              phone_prefix: z.string().optional().describe("Prefix internacional, p. ex. '+34'"),
-              country: z.string().describe("Codi de país ISO alpha-2, p. ex. 'ES'"),
+              first_name: z.string().describe("Nom. [prova: Test]"),
+              last_name: z.string().describe("Cognoms. [prova: MCP]"),
+              email: z.string().describe("Correu electrònic. [prova: test@motion4rent.com]"),
+              phone: z.string().describe("Telèfon (sense prefix). [prova: 600000000]"),
+              phone_prefix: z.string().optional().describe("Prefix internacional, p. ex. '+34'. [prova: +34]"),
+              country: z.string().describe("Codi de país ISO alpha-2, p. ex. 'ES'. [prova: ES]"),
             })
             .describe("Dades del client (amb consentiment)"),
-          language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'."),
+          language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'. [prova: es]"),
           currency: z
             .string()
             .optional()
-            .describe("Moneda de pagament (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte. El servidor valida i recalcula."),
+            .describe("Moneda de pagament (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte. El servidor valida i recalcula. [prova: USD]"),
           newsletter: z.boolean().optional().describe("Consentiment de newsletter. Opcional."),
           comments: z.string().optional().describe("Comentaris per a la botiga. Opcional."),
         },
