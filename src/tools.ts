@@ -39,35 +39,54 @@ function errResult(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
 
+/**
+ * Descarrega una imatge i la retorna com a content block MCP (base64) perquè el client la MOSTRI
+ * (una URL de text no es renderitza; un bloc image sí). null si falla, no és imatge o és massa gran.
+ */
+async function imageContentBlock(url: string | null | undefined) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const mime = res.headers.get("content-type") ?? "image/jpeg";
+    if (!mime.startsWith("image/")) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 900_000) return null; // evita payloads enormes al client
+    return { type: "image" as const, data: buf.toString("base64"), mimeType: mime };
+  } catch {
+    return null;
+  }
+}
+
 export function registerTools(server: McpServer, config: AppConfig): void {
   // 1) COBERTURA / desambiguació de ciutat.
   server.registerTool(
     "check_city_coverage",
     {
-      title: "Comprova cobertura de ciutat",
+      title: "Check city coverage (Motion4Rent)",
       description:
-        "Comprova si Motion4Rent dona servei en una ciutat i resol homònimes (mateixa ciutat en diversos països). " +
-        "Usa-ho abans de cercar si el país és ambigu.",
+        "Check whether Motion4Rent operates in a city and disambiguate homonyms (same city name in several countries). " +
+        "Use before searching if the country is ambiguous.",
       inputSchema: {
-        city: z.string().describe("Nom de la ciutat (qualsevol idioma), p. ex. 'Barcelona'"),
+        city: z.string().describe("City name (any language), e.g. 'Barcelona'"),
       },
     },
     async ({ city }) => {
       try {
         const geo = await geocodeCity(config.apiBaseUrl, city);
         if (!geo.places.length) {
-          return jsonResult(`No consta cobertura per a "${city}".`, { city, covered: false, places: [] });
+          return jsonResult(`No Motion4Rent coverage found for "${city}".`, { city, covered: false, places: [] });
         }
         const covered = true;
         const needsCountry = geo.countries > 1;
         return jsonResult(
           needsCountry
-            ? `"${city}" existeix en ${geo.countries} països: cal especificar el país abans de cercar.`
-            : `Motion4Rent dona servei a "${city}".`,
+            ? `"${city}" exists in ${geo.countries} countries: specify the country before searching.`
+            : `Motion4Rent operates in "${city}".`,
           { city, covered, needs_country_disambiguation: needsCountry, places: geo.places },
         );
       } catch (e) {
-        return errResult(`Error comprovant cobertura: ${(e as Error).message}`);
+        return errResult(`Error checking coverage: ${(e as Error).message}`);
       }
     },
   );
@@ -76,28 +95,29 @@ export function registerTools(server: McpServer, config: AppConfig): void {
   server.registerTool(
     "search_mobility_rentals",
     {
-      title: "Cerca lloguers de mobilitat",
+      title: "Search mobility rentals (Motion4Rent)",
       description:
-        "Cerca equips de mobilitat disponibles (cadires de rodes, scooters, etc.) en una ciutat i unes dates, " +
-        "amb preu total per producte. Retorna també un ENLLAÇ a la web on l'usuari completa lliurament, opcions i " +
-        "pagament (aquesta tool NO reserva ni cobra). Si la ciutat és homònima en diversos països, indica'l a 'country'.",
+        "Search available Motion4Rent mobility equipment (wheelchairs, scooters, etc.) in a city and date range, " +
+        "with total price per product and a photo (image_url). Also returns a LINK to the website where the user can " +
+        "complete delivery, options and payment (this tool does NOT book or charge). If the city name is a homonym " +
+        "across countries, pass 'country'.",
       inputSchema: {
-        city: z.string().describe("Ciutat, p. ex. 'Barcelona'"),
-        start_date: DATE.describe("Data d'inici (YYYY-MM-DD)"),
-        end_date: DATE.describe("Data de fi (YYYY-MM-DD)"),
+        city: z.string().describe("City, e.g. 'Barcelona'"),
+        start_date: DATE.describe("Start date (YYYY-MM-DD)"),
+        end_date: DATE.describe("End date (YYYY-MM-DD)"),
         product_type: z
           .string()
           .optional()
-          .describe("Tipus de producte en text lliure (p. ex. 'silla de ruedas eléctrica'). Opcional; filtra l'enllaç."),
+          .describe("Free-text product type (e.g. 'electric wheelchair'). Optional; filters the link."),
         country: z
           .string()
           .optional()
-          .describe("Codi de país ISO alpha-2 (p. ex. 'es') per desambiguar ciutats homònimes. Opcional."),
-        language: z.string().optional().describe("Idioma del client (en, es, fr, de, it, nl, pt...). Per defecte 'en'."),
+          .describe("ISO alpha-2 country code (e.g. 'es') to disambiguate homonym cities. Optional."),
+        language: z.string().optional().describe("Client language (en, es, fr, de, it, nl, pt...). Default 'en'."),
         currency: z
           .string()
           .optional()
-          .describe("Moneda per mostrar els preus (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte."),
+          .describe("Currency to display prices in (one from list_currencies, e.g. 'USD'). Optional; defaults to the product currency."),
       },
     },
     async ({ city, start_date, end_date, product_type, country, language, currency }) => {
@@ -105,9 +125,9 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         const lang = language ?? "en";
         const geo = await geocodeCity(config.apiBaseUrl, city);
         if (!geo.places.length) {
-          return jsonResult(`No consta cobertura per a "${city}".`, { city, covered: false });
+          return jsonResult(`No Motion4Rent coverage found for "${city}".`, { city, covered: false });
         }
-        // Selecció de lloc: filtra per país si es dona; si hi ha homònimes i no s'ha concretat, demana-ho.
+        // Place selection: filter by country if given; if homonyms and not specified, ask.
         const byCountry = country
           ? geo.places.filter((p) => p.country === country.toLowerCase())
           : geo.places;
@@ -115,7 +135,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         const distinctCountries = [...new Set(candidates.map((p) => p.country))];
         if (distinctCountries.length > 1) {
           return jsonResult(
-            `"${city}" existeix en diversos països (${distinctCountries.join(", ")}). Torna a cridar amb 'country'.`,
+            `"${city}" exists in several countries (${distinctCountries.join(", ")}). Call again with 'country'.`,
             { needs_country_disambiguation: true, countries: distinctCountries, places: geo.places },
           );
         }
@@ -175,9 +195,9 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         }));
         const summary =
           search.number > 0
-            ? `Motion4Rent té ${search.number} opció(ns) de lloguer a ${name} (${start_date} → ${end_date}). ` +
-              `Mostro ${productos.length}${truncated ? " (retallat)" : ""}. Enllaç per reservar: ${bookingLink}`
-            : `Motion4Rent no té disponibilitat a ${name} per a aquestes dates. Enllaç per revisar/altres dates: ${bookingLink}`;
+            ? `Motion4Rent has ${search.number} rental option(s) in ${name} (${start_date} → ${end_date}). ` +
+              `Showing ${productos.length}${truncated ? " (truncated)" : ""}. Booking link: ${bookingLink}`
+            : `Motion4Rent has no availability in ${name} for these dates. Link to review/other dates: ${bookingLink}`;
 
         return jsonResult(summary, {
           provider: "Motion4Rent",
@@ -190,13 +210,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
-            "Aquests lloguers els ofereix MOTION4RENT. Mostra la foto (image_url) i el nom; NO mostris els ids interns " +
-            "(id_product_store/id_store) a l'usuari. Per al detall complet (botiga+mapa, lliurament, extres) crida " +
-            "get_rental_details amb aquests ids. El pagament es fa a la web o amb create_booking.",
+            "These rentals are offered by MOTION4RENT. Show the photo (image_url) and the name; do NOT show internal " +
+            "ids (id_product_store/id_store) to the user. For full detail (store+map, delivery, extras) call " +
+            "get_rental_details with these ids. Payment happens on the website or via create_booking.",
           truncated,
         });
       } catch (e) {
-        return errResult(`Error cercant disponibilitat: ${(e as Error).message}`);
+        return errResult(`Error searching availability: ${(e as Error).message}`);
       }
     },
   );
@@ -205,24 +225,24 @@ export function registerTools(server: McpServer, config: AppConfig): void {
   server.registerTool(
     "get_rental_details",
     {
-      title: "Detall d'un producte de lloguer",
+      title: "Rental product details (Motion4Rent)",
       description:
-        "Retorna el detall COMPLET d'un producte de MOTION4RENT: preu, fiança, foto (image_url), la botiga " +
-        "(nom + enllaç de mapa 'map_url'), TOTS els tipus de lliurament DISPONIBLES per a AQUEST producte (amb preu) " +
-        "i les opcions/extres. IMPORTANT: presenta a l'usuari el NOM de la botiga i el map_url; NO mostris mai els " +
-        "identificadors interns (id_store, id_product_store). Ofereix només els delivery_options que retorna (la resta " +
-        "no els admet aquest article). Usa els ids obtinguts de search_mobility_rentals.",
+        "Returns the FULL detail of a MOTION4RENT product: price, deposit, photo (image_url + an inline image), the store " +
+        "(name + map link 'map_url'), ALL delivery types AVAILABLE for THIS product (with price), and the options/extras. " +
+        "IMPORTANT: present the store NAME and map_url to the user; NEVER show internal ids (id_store, id_product_store). " +
+        "Only offer the delivery_options returned here (the rest are not available for this item). Use the ids from " +
+        "search_mobility_rentals.",
       inputSchema: {
-        id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
-        id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
-        id_virtual: z.number().describe("id_virtual del resultat de cerca (0 si botiga física). [prova: 0]"),
-        start_date: DATE.describe("Data d'inici (YYYY-MM-DD). [prova: 2026-07-24]"),
-        end_date: DATE.describe("Data de fi (YYYY-MM-DD). [prova: 2026-07-24]"),
-        language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'. [prova: es]"),
+        id_product_store: z.number().describe("id_product_store from the search result. [Seville test: 559]"),
+        id_store: z.number().describe("id_store from the search result. [Seville test: 76]"),
+        id_virtual: z.number().describe("id_virtual from the search result (0 if physical store). [test: 0]"),
+        start_date: DATE.describe("Start date (YYYY-MM-DD). [test: 2026-07-24]"),
+        end_date: DATE.describe("End date (YYYY-MM-DD). [test: 2026-07-24]"),
+        language: z.string().optional().describe("Language (en, es, fr...). Default 'en'. [test: es]"),
         currency: z
           .string()
           .optional()
-          .describe("Moneda per mostrar els preus (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte. [prova: USD]"),
+          .describe("Currency to display prices in (one from list_currencies, e.g. 'USD'). Optional; defaults to product currency. [test: USD]"),
       },
     },
     async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency }) => {
@@ -239,46 +259,43 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           getProductOptions(config.apiBaseUrl, id_product_store).catch(() => []),
         ]);
         if (!detail) {
-          return jsonResult("No s'ha trobat el detall d'aquest producte per a aquestes dates.", {
+          return jsonResult("No detail found for this product on these dates.", {
             found: false,
             id_product_store,
           });
         }
 
-        // Moneda: converteix amb el mateix 'rate' que el booking (1 si no es demana o és la mateixa).
-        // La fiança NO es converteix (la preautorització es reté en la moneda del proveïdor).
+        // Currency: convert with the same 'rate' as booking (1 if not requested or same). Deposit is NOT
+        // converted (the preauthorization is held in the supplier's currency).
         const target = (currency ?? "").trim().toUpperCase();
         const src = (detail.currency ?? "EUR").toUpperCase();
         const rate = target && src !== target ? await getExchangeRate(config.apiBaseUrl, src, target) : 1;
         const displayCurrency = rate !== 1 ? target : src;
         const conv = (v: number | null) => (v == null ? null : Math.round(v * rate * 100) / 100);
 
-        // Tipus de lliurament REALMENT disponibles per aquest producte (només els que admet).
+        // Delivery types ACTUALLY available for this product (only the ones it supports).
         const cityPrice = conv(detail.city_delivery_price) ?? 0;
-        const deliveryOptions: any[] = [{ delivery_type: 0, label: "Recollida a botiga", price: 0, free: true }];
+        const deliveryOptions: any[] = [{ delivery_type: 0, label: "Store pickup", price: 0, free: true }];
         if (detail.delivery_available) {
-          deliveryOptions.push({ delivery_type: 1, label: "Lliurament a domicili", price: cityPrice, needs: ["delivery_address"] });
-          deliveryOptions.push({ delivery_type: 2, label: "Lliurament a hotel", price: cityPrice, needs: ["delivery_address", "hotel_name?"] });
+          deliveryOptions.push({ delivery_type: 1, label: "Home delivery", price: cityPrice, needs: ["delivery_address"] });
+          deliveryOptions.push({ delivery_type: 2, label: "Hotel delivery", price: cityPrice, needs: ["delivery_address", "hotel_name?"] });
         }
         if (detail.cruise_available) {
-          deliveryOptions.push({ delivery_type: 3, label: "Lliurament a creuer", price: cityPrice, needs: ["delivery_address"] });
+          deliveryOptions.push({ delivery_type: 3, label: "Cruise ship delivery", price: cityPrice, needs: ["delivery_address"] });
         }
         if (detail.airports.length) {
           deliveryOptions.push({
             delivery_type: 5,
-            label: "Lliurament a aeroport",
+            label: "Airport delivery",
             airports: detail.airports.map((a) => ({ place_id: a.place_id, name: a.name, price: conv(a.price) })),
             needs: ["airport_place_id", "flight_number"],
           });
         }
 
+        const imageUrl = productImageUrl(config.productImageBase, detail.image);
         const out = {
           provider: "Motion4Rent",
-          product: {
-            name: detail.name,
-            type: detail.type,
-            image_url: productImageUrl(config.productImageBase, detail.image),
-          },
+          product: { name: detail.name, type: detail.type, image_url: imageUrl },
           price: {
             currency: displayCurrency,
             total: conv(detail.price_total),
@@ -293,21 +310,25 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             id: o.id,
             name: o.name,
             price: conv(o.price),
-            price_basis: o.type === 1 ? "fix" : "per_dia",
+            price_basis: o.type === 1 ? "flat" : "per_day",
           })),
           cancellation: detail.cancellation,
           days: detail.days,
           note:
-            "Presenta el NOM de la botiga i el map_url a l'usuari; NO mostris ids interns. Ofereix només aquests " +
-            "delivery_options. El total final (amb lliurament/opcions/moneda) el recalcula el servidor en reservar.",
+            "Show the store NAME and map_url to the user; do NOT show internal ids. Offer only these delivery_options. " +
+            "The final total (with delivery/options/currency) is recomputed server-side at booking.",
         };
-        return jsonResult(
-          `Motion4Rent — "${detail.name ?? "producte"}" a ${detail.store_name ?? "la botiga"} (preus en ${displayCurrency}). ` +
-            `${deliveryOptions.length} opció(ns) de lliurament, ${out.options.length} extra(s).`,
-          out,
-        );
+        const summary =
+          `Motion4Rent — "${detail.name ?? "product"}" at ${detail.store_name ?? "the store"} (prices in ${displayCurrency}). ` +
+          `${deliveryOptions.length} delivery option(s), ${out.options.length} extra(s).`;
+        // Include an inline image so the client SHOWS the photo (a text URL isn't rendered).
+        const img = await imageContentBlock(imageUrl);
+        const content: any[] = [{ type: "text" as const, text: summary }];
+        if (img) content.push(img);
+        content.push({ type: "text" as const, text: "```json\n" + JSON.stringify(out, null, 2) + "\n```" });
+        return { content };
       } catch (e) {
-        return errResult(`Error obtenint el detall: ${(e as Error).message}`);
+        return errResult(`Error getting details: ${(e as Error).message}`);
       }
     },
   );
@@ -316,35 +337,35 @@ export function registerTools(server: McpServer, config: AppConfig): void {
   server.registerTool(
     "list_product_options",
     {
-      title: "Opcions/extres disponibles d'un producte",
+      title: "Product options/extras (Motion4Rent)",
       description:
-        "Retorna les opcions/extres que es poden afegir a la reserva d'un producte (p. ex. reposapeus, cistella). " +
-        "Cada opció porta un 'id' (que després es passa a create_booking dins 'options_id'), nom, preu i base " +
-        "('fix' o 'per_dia'). El preu és en la moneda del producte; el total en la moneda triada es recalcula al " +
-        "servidor en reservar. Usa l'id_product_store obtingut de search_mobility_rentals.",
+        "Returns the optional extras that can be added to a product's booking (e.g. leg rest, basket). Each option has " +
+        "an 'id' (passed to create_booking inside 'options_id'), name, price and basis ('flat' or 'per_day'). Price is " +
+        "in the product currency; the total in the chosen currency is recomputed server-side at booking. Use the " +
+        "id_product_store from search_mobility_rentals.",
       inputSchema: {
-        id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
+        id_product_store: z.number().describe("id_product_store from the search result. [Seville test: 559]"),
       },
     },
     async ({ id_product_store }) => {
       try {
         const options = await getProductOptions(config.apiBaseUrl, id_product_store);
         if (!options.length) {
-          return jsonResult("Aquest producte no té opcions/extres.", { id_product_store, options: [] });
+          return jsonResult("This product has no options/extras.", { id_product_store, options: [] });
         }
         const out = options.map((o) => ({
           id: o.id,
           name: o.name,
           price: o.price,
-          price_basis: o.type === 1 ? "fix" : "per_dia",
+          price_basis: o.type === 1 ? "flat" : "per_day",
         }));
         return jsonResult(
-          `${out.length} opció(ns) disponibles. Preus en la moneda del producte; el total en la moneda triada es ` +
-            `recalcula en reservar. Passa els 'id' triats a create_booking com 'options_id'.`,
+          `${out.length} option(s) available. Prices in the product currency; the total in the chosen currency is ` +
+            `recomputed at booking. Pass the chosen 'id' values to create_booking as 'options_id'.`,
           { id_product_store, options: out },
         );
       } catch (e) {
-        return errResult(`Error obtenint les opcions: ${(e as Error).message}`);
+        return errResult(`Error getting options: ${(e as Error).message}`);
       }
     },
   );
@@ -353,22 +374,22 @@ export function registerTools(server: McpServer, config: AppConfig): void {
   server.registerTool(
     "list_currencies",
     {
-      title: "Monedes disponibles",
+      title: "Available currencies (Motion4Rent)",
       description:
-        "Retorna les monedes en què l'usuari pot veure preus i pagar (llista dinàmica de la plataforma). " +
-        "Usa-la per DEMANAR a l'usuari en quina moneda vol els preus i la reserva, i passa la triada com a 'currency' " +
-        "a search_mobility_rentals / get_rental_details / create_booking. Si no s'indica, s'usa la moneda del producte.",
+        "Returns the currencies the user can view prices and pay in (dynamic platform list). Use it to ASK the user " +
+        "which currency they want for prices and booking, and pass the chosen one as 'currency' to " +
+        "search_mobility_rentals / get_rental_details / create_booking. If not given, the product currency is used.",
       inputSchema: {},
     },
     async () => {
       try {
         const currencies = await getActiveCurrencies(config.apiBaseUrl);
         return jsonResult(
-          `Monedes disponibles: ${currencies.join(", ")}. Pregunta a l'usuari quina vol i passa-la com a 'currency'.`,
-          { currencies, default: "moneda del producte si no se n'indica cap" },
+          `Available currencies: ${currencies.join(", ")}. Ask the user which one and pass it as 'currency'.`,
+          { currencies, default: "product currency if none is given" },
         );
       } catch (e) {
-        return errResult(`Error obtenint les monedes: ${(e as Error).message}`);
+        return errResult(`Error getting currencies: ${(e as Error).message}`);
       }
     },
   );
@@ -377,32 +398,32 @@ export function registerTools(server: McpServer, config: AppConfig): void {
   server.registerTool(
     "mobility_policies",
     {
-      title: "Polítiques i preguntes freqüents de Motion4Rent",
+      title: "Policies & FAQ (Motion4Rent)",
       description:
-        "Respon preguntes generals sobre el servei: cancel·lació, fiança/dipòsit, procés i cost de lliurament, " +
-        "cobertura, plegabilitat, pes/capacitat, transport públic/avió, assegurança, devolució i ciutats. " +
-        "Els textos oficials estan en ESPANYOL (font de veritat): tradueix-los SEMPRE a l'idioma de l'usuari " +
-        "(passa 'language' amb aquest idioma). Passa 'query' per filtrar; sense query, torna tot.",
+        "Answers general service questions: cancellation, deposit, delivery process and cost, coverage, foldability, " +
+        "weight/capacity, public transport/flights, insurance, returns and cities. The official texts are in SPANISH " +
+        "(source of truth): ALWAYS translate them to the user's language (pass 'language' with that language). Pass " +
+        "'query' to filter; without a query, returns everything.",
       inputSchema: {
         query: z
           .string()
           .optional()
-          .describe("Pregunta o paraules clau (p. ex. 'cancelación', 'deposit', 'delivery to hotel'). Opcional."),
+          .describe("Question or keywords (e.g. 'cancellation', 'deposit', 'delivery to hotel'). Optional."),
         language: z
           .string()
           .optional()
-          .describe("Idioma de l'usuari (en, es, fr, de, it...). El text font ve en 'es'; tradueix-lo a aquest idioma."),
+          .describe("User language (en, es, fr, de, it...). Source text is 'es'; translate it to this language."),
       },
     },
     async ({ query, language }) => {
       const policies = findPolicies(query);
       const lang = (language ?? "").trim();
       const target = lang && !lang.toLowerCase().startsWith("es")
-        ? `Tradueix els textos (font 'es') a '${lang}' abans de respondre a l'usuari.`
-        : `Textos oficials en espanyol; tradueix-los a l'idioma de l'usuari.`;
+        ? `Translate the texts (source 'es') to '${lang}' before answering the user.`
+        : `Official texts in Spanish; translate them to the user's language.`;
       const summary = query
-        ? `${policies.length} política(es) rellevant(s) per a "${query}". ${target}`
-        : `Totes les polítiques (${policies.length}). ${target}`;
+        ? `${policies.length} relevant policy(ies) for "${query}". ${target}`
+        : `All policies (${policies.length}). ${target}`;
       return jsonResult(
         summary,
         policies.map((p) => ({ topic: p.topic, title: p.title, text: p.text, source_language: "es" })),
@@ -416,66 +437,69 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     server.registerTool(
       "create_booking",
       {
-        title: "Crea una reserva amb enllaç de pagament (recollida a botiga)",
+        title: "Create booking with payment link (Motion4Rent)",
         description:
-          "Prepara la reserva i retorna un ENLLAÇ DE PAGAMENT Stripe (urlTpv) que l'usuari obre per pagar. La reserva " +
-          "ES FORMALITZA quan l'usuari paga (fins llavors només queda l'enllaç). NO facis servir termes interns com 'hold' " +
-          "amb l'usuari; digues que la reserva es confirmarà en pagar. Per defecte RECOLLIDA A BOTIGA; opcionalment lliurament " +
-          "a CIUTAT (delivery_type 1 domicili / 2 hotel, amb delivery_address). Pots afegir opcions/extres amb 'options_id' " +
-          "(IDs de list_product_options). El servidor valora preu, opcions i lliurament. Abans de cridar-la, DEMANA el consentiment " +
-          "de l'usuari i les seves dades (nom, cognoms, email, telèfon amb prefix, país), amb una frase tipus: «¿Confirmes que " +
-          "prepari la reserva i generi l'enllaç de pagament? La reserva es formalitzarà en pagar.» Usa els identificadors de " +
-          "search_mobility_rentals. El servidor recalcula el preu (no l'enviïs tu). Segons el proveïdor, l'usuari pot pagar un " +
-          "DIPÒSIT ara i la resta a la recollida: comunica-li el desglossament (pay_now / pay_at_pickup). Algunes reserves queden " +
-          "pendents de confirmació del punt de recollida després de pagar. Si la resposta indica fallback (el proveïdor requereix " +
-          "el checkout complet), usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
+          "Prepares the booking and returns a Stripe PAYMENT LINK (urlTpv) the user opens to pay. The booking is " +
+          "FORMALIZED when the user pays (until then only the link exists). Do NOT use internal terms like 'hold' with " +
+          "the user; say the booking is confirmed upon payment. Default STORE PICKUP; optionally CITY delivery " +
+          "(delivery_type 1 home / 2 hotel / 3 cruise, with delivery_address) or AIRPORT (5, with airport_place_id + " +
+          "flight_number). Offer ONLY the delivery types get_rental_details reports as available. Add options/extras with " +
+          "'options_id' (from list_product_options). The server prices product, options and delivery. Before calling it, " +
+          "ASK for the user's consent and data (first/last name, email, phone with prefix, country), e.g.: «Shall I " +
+          "prepare the booking and generate the payment link? The booking is confirmed once you pay.» Use the ids from " +
+          "search_mobility_rentals. The server recomputes the price (do NOT send it). The user may pay a DEPOSIT now and " +
+          "the rest at pickup: tell them the breakdown (pay_now / pay_at_pickup). Some bookings stay pending store " +
+          "confirmation after payment. ERROR 'delivery_type_not_available' means THIS PRODUCT/STORE does not offer that " +
+          "delivery type — it is NOT about the address: offer store pickup or the booking_link, do not blame the address. " +
+          "If the response indicates fallback (supplier requires the full checkout), use the 'booking_link' from " +
+          "search_mobility_rentals instead.",
         inputSchema: {
-          id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
-          id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
-          id_virtual: z.number().describe("id_virtual del resultat de cerca (0 si botiga física). [prova: 0]"),
-          start_date: DATE.describe("Data d'inici (YYYY-MM-DD). [prova: 2026-07-24]"),
-          end_date: DATE.describe("Data de fi (YYYY-MM-DD). [prova: 2026-07-24]"),
+          id_product_store: z.number().describe("id_product_store from the search result. [Seville test: 559]"),
+          id_store: z.number().describe("id_store from the search result. [Seville test: 76]"),
+          id_virtual: z.number().describe("id_virtual from the search result (0 if physical store). [test: 0]"),
+          start_date: DATE.describe("Start date (YYYY-MM-DD). [test: 2026-07-24]"),
+          end_date: DATE.describe("End date (YYYY-MM-DD). [test: 2026-07-24]"),
           customer: z
             .object({
-              first_name: z.string().describe("Nom. [prova: Test]"),
-              last_name: z.string().describe("Cognoms. [prova: MCP]"),
-              email: z.string().describe("Correu electrònic. [prova: test@motion4rent.com]"),
-              phone: z.string().describe("Telèfon (sense prefix). [prova: 600000000]"),
-              phone_prefix: z.string().optional().describe("Prefix internacional, p. ex. '+34'. [prova: +34]"),
-              country: z.string().describe("Codi de país ISO alpha-2, p. ex. 'ES'. [prova: ES]"),
+              first_name: z.string().describe("First name. [test: Test]"),
+              last_name: z.string().describe("Last name. [test: MCP]"),
+              email: z.string().describe("Email. [test: test@motion4rent.com]"),
+              phone: z.string().describe("Phone (without prefix). [test: 600000000]"),
+              phone_prefix: z.string().optional().describe("International prefix, e.g. '+34'. [test: +34]"),
+              country: z.string().describe("ISO alpha-2 country code, e.g. 'ES'. [test: ES]"),
             })
-            .describe("Dades del client (amb consentiment)"),
-          language: z.string().optional().describe("Idioma (en, es, fr...). Per defecte 'en'. [prova: es]"),
+            .describe("Customer data (with consent)"),
+          language: z.string().optional().describe("Language (en, es, fr...). Default 'en'. [test: es]"),
           currency: z
             .string()
             .optional()
-            .describe("Moneda de pagament (una de list_currencies, p. ex. 'USD'). Opcional; per defecte la del producte. El servidor valida i recalcula. [prova: USD]"),
+            .describe("Payment currency (one from list_currencies, e.g. 'USD'). Optional; defaults to product currency. Server validates and recomputes. [test: USD]"),
           options_id: z
             .array(z.number())
             .optional()
-            .describe("IDs d'opcions/extres a afegir (de list_product_options). El servidor en valora el preu. Opcional. [prova: [1710,1711]]"),
+            .describe("Option/extra ids to add (from list_product_options). The server prices them. Optional. [test: [1710,1711]]"),
           delivery_type: z
             .number()
             .optional()
-            .describe("Lliurament: 0 (o omès) recollida a botiga (gratis), 1 domicili, 2 hotel, 3 creuer (ciutat), 5 aeroport."),
+            .describe("Delivery: 0 (or omitted) store pickup (free), 1 home, 2 hotel, 3 cruise (city), 5 airport. Only use types get_rental_details reports as available."),
           delivery_address: z
             .string()
             .optional()
-            .describe("Adreça/punt de lliurament (per creuer: port/moll). OBLIGATÒRIA si delivery_type és 1, 2 o 3."),
+            .describe("Delivery address/point (for cruise: port/dock). REQUIRED if delivery_type is 1, 2 or 3."),
           hotel_name: z
             .string()
             .optional()
-            .describe("Nom de l'hotel (opcional, si delivery_type és 2)."),
+            .describe("Hotel name (optional, if delivery_type is 2)."),
           airport_place_id: z
             .string()
             .optional()
-            .describe("place_id de l'aeroport (de get_rental_details.airports). OBLIGATORI si delivery_type és 5."),
+            .describe("Airport place_id (from get_rental_details.airports). REQUIRED if delivery_type is 5."),
           flight_number: z
             .string()
             .optional()
-            .describe("Nº de vol. OBLIGATORI si delivery_type és 5."),
-          newsletter: z.boolean().optional().describe("Consentiment de newsletter. Opcional."),
-          comments: z.string().optional().describe("Comentaris per a la botiga. Opcional."),
+            .describe("Flight number. REQUIRED if delivery_type is 5."),
+          newsletter: z.boolean().optional().describe("Newsletter consent. Optional."),
+          comments: z.string().optional().describe("Comments for the store. Optional."),
         },
       },
       async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, currency, options_id, delivery_type, delivery_address, hotel_name, airport_place_id, flight_number, newsletter, comments }) => {
@@ -508,19 +532,23 @@ export function registerTools(server: McpServer, config: AppConfig): void {
 
           if (r.fallbackDeeplink) {
             return jsonResult(
-              "Aquest proveïdor necessita el checkout complet de la web. Fes servir el 'booking_link' de search_mobility_rentals.",
+              "This supplier requires the full website checkout. Use the 'booking_link' from search_mobility_rentals.",
               { created: false, fallback_deeplink: true },
             );
           }
           if (!r.ok) {
-            return errResult(`No s'ha pogut crear la reserva (${r.status}): ${r.error ?? "error desconegut"}`);
+            const hint =
+              r.error === "delivery_type_not_available"
+                ? " (this product/store does not offer that delivery type — NOT an address issue; offer store pickup or the booking_link)"
+                : "";
+            return errResult(`Could not create the booking (${r.status}): ${r.error ?? "unknown error"}.${hint}`);
           }
 
           return jsonResult(
-            `Enllaç de pagament preparat (ref. ${r.increment_id}): ${r.urlTpv}. La reserva es FORMALITZARÀ quan l'usuari pagui. ` +
-              `L'usuari paga ${r.pay_now} ara` +
-              (r.pay_at_pickup ? ` i ${r.pay_at_pickup} a la recollida a botiga` : "") +
-              `. Presenta-li l'enllaç i el desglossament; NO usis el terme 'hold'.`,
+            `Payment link ready (ref. ${r.increment_id}): ${r.urlTpv}. The booking is FORMALIZED once the user pays. ` +
+              `The user pays ${r.pay_now} now` +
+              (r.pay_at_pickup ? ` and ${r.pay_at_pickup} at pickup` : "") +
+              `. Present the link and the breakdown; do NOT use the term 'hold'.`,
             {
               created: true,
               increment_id: r.increment_id,
@@ -531,12 +559,12 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               prepayment_percent: r.prepayment_pct,
               free_cancellation_until: r.free_cancellation_until,
               note:
-                "L'usuari completa el pagament a payment_link i llavors la reserva queda formalitzada. Després del pagament, " +
-                "segons el proveïdor pot quedar pendent de confirmació del punt de recollida (avisa l'usuari). No usis 'hold'.",
+                "The user completes payment at payment_link and then the booking is formalized. After payment, " +
+                "depending on the supplier it may stay pending store confirmation (warn the user). Do not use 'hold'.",
             },
           );
         } catch (e) {
-          return errResult(`Error creant la reserva: ${(e as Error).message}`);
+          return errResult(`Error creating the booking: ${(e as Error).message}`);
         }
       },
     );
