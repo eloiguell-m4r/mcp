@@ -418,14 +418,17 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       {
         title: "Crea una reserva amb enllaç de pagament (recollida a botiga)",
         description:
-          "Crea una reserva en estat 'hold' i retorna un ENLLAÇ DE PAGAMENT Stripe (urlTpv) que l'usuari obre per pagar. " +
-          "Per defecte RECOLLIDA A BOTIGA; opcionalment lliurament a CIUTAT (delivery_type 1 domicili / 2 hotel, amb delivery_address). " +
-          "Pots afegir opcions/extres amb 'options_id' (IDs de list_product_options). El servidor valora preu, opcions i lliurament. " +
-          "Abans de cridar-la, DEMANA el consentiment de l'usuari i les seves dades (nom, cognoms, email, telèfon amb prefix, país). " +
-          "Usa els identificadors obtinguts de search_mobility_rentals. El servidor recalcula el preu (no l'enviïs tu). Segons el proveïdor, " +
-          "l'usuari pot pagar un DIPÒSIT ara i la resta a la recollida: comunica-li el desglossament (pay_now / pay_at_pickup). Algunes " +
-          "reserves queden pendents de confirmació. Si la resposta indica fallback (el proveïdor requereix el checkout complet), " +
-          "usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
+          "Prepara la reserva i retorna un ENLLAÇ DE PAGAMENT Stripe (urlTpv) que l'usuari obre per pagar. La reserva " +
+          "ES FORMALITZA quan l'usuari paga (fins llavors només queda l'enllaç). NO facis servir termes interns com 'hold' " +
+          "amb l'usuari; digues que la reserva es confirmarà en pagar. Per defecte RECOLLIDA A BOTIGA; opcionalment lliurament " +
+          "a CIUTAT (delivery_type 1 domicili / 2 hotel, amb delivery_address). Pots afegir opcions/extres amb 'options_id' " +
+          "(IDs de list_product_options). El servidor valora preu, opcions i lliurament. Abans de cridar-la, DEMANA el consentiment " +
+          "de l'usuari i les seves dades (nom, cognoms, email, telèfon amb prefix, país), amb una frase tipus: «¿Confirmes que " +
+          "prepari la reserva i generi l'enllaç de pagament? La reserva es formalitzarà en pagar.» Usa els identificadors de " +
+          "search_mobility_rentals. El servidor recalcula el preu (no l'enviïs tu). Segons el proveïdor, l'usuari pot pagar un " +
+          "DIPÒSIT ara i la resta a la recollida: comunica-li el desglossament (pay_now / pay_at_pickup). Algunes reserves queden " +
+          "pendents de confirmació del punt de recollida després de pagar. Si la resposta indica fallback (el proveïdor requereix " +
+          "el checkout complet), usa en lloc d'això el 'booking_link' de search_mobility_rentals.",
         inputSchema: {
           id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
           id_store: z.number().describe("id_store del resultat de cerca. [prova Sevilla: 76]"),
@@ -514,10 +517,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           }
 
           return jsonResult(
-            `Reserva creada (hold ${r.increment_id}). Enllaç de pagament: ${r.urlTpv}. ` +
+            `Enllaç de pagament preparat (ref. ${r.increment_id}): ${r.urlTpv}. La reserva es FORMALITZARÀ quan l'usuari pagui. ` +
               `L'usuari paga ${r.pay_now} ara` +
               (r.pay_at_pickup ? ` i ${r.pay_at_pickup} a la recollida a botiga` : "") +
-              `. Presenta-li l'enllaç i el desglossament.`,
+              `. Presenta-li l'enllaç i el desglossament; NO usis el terme 'hold'.`,
             {
               created: true,
               increment_id: r.increment_id,
@@ -528,7 +531,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               prepayment_percent: r.prepayment_pct,
               free_cancellation_until: r.free_cancellation_until,
               note:
-                "El pagament el completa l'usuari a payment_link. La reserva pot quedar pendent de confirmació del punt de recollida.",
+                "L'usuari completa el pagament a payment_link i llavors la reserva queda formalitzada. Després del pagament, " +
+                "segons el proveïdor pot quedar pendent de confirmació del punt de recollida (avisa l'usuari). No usis 'hold'.",
             },
           );
         } catch (e) {
