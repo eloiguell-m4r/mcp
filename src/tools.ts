@@ -16,6 +16,7 @@ import {
   createBooking,
   getActiveCurrencies,
   getExchangeRate,
+  getProductOptions,
 } from "./m4rApi.js";
 import { findPolicies } from "./knowledge/policies.js";
 
@@ -247,6 +248,43 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         return jsonResult(`Detall de "${detail.name ?? "producte"}".`, detail);
       } catch (e) {
         return errResult(`Error obtenint el detall: ${(e as Error).message}`);
+      }
+    },
+  );
+
+  // 3a) OPCIONS/EXTRES d'un producte (descoberta). Perquè l'assistent les pugui oferir abans de reservar.
+  server.registerTool(
+    "list_product_options",
+    {
+      title: "Opcions/extres disponibles d'un producte",
+      description:
+        "Retorna les opcions/extres que es poden afegir a la reserva d'un producte (p. ex. reposapeus, cistella). " +
+        "Cada opció porta un 'id' (que després es passa a create_booking dins 'options_id'), nom, preu i base " +
+        "('fix' o 'per_dia'). El preu és en la moneda del producte; el total en la moneda triada es recalcula al " +
+        "servidor en reservar. Usa l'id_product_store obtingut de search_mobility_rentals.",
+      inputSchema: {
+        id_product_store: z.number().describe("id_product_store del resultat de cerca. [prova Sevilla: 559]"),
+      },
+    },
+    async ({ id_product_store }) => {
+      try {
+        const options = await getProductOptions(config.apiBaseUrl, id_product_store);
+        if (!options.length) {
+          return jsonResult("Aquest producte no té opcions/extres.", { id_product_store, options: [] });
+        }
+        const out = options.map((o) => ({
+          id: o.id,
+          name: o.name,
+          price: o.price,
+          price_basis: o.type === 1 ? "fix" : "per_dia",
+        }));
+        return jsonResult(
+          `${out.length} opció(ns) disponibles. Preus en la moneda del producte; el total en la moneda triada es ` +
+            `recalcula en reservar. Passa els 'id' triats a create_booking com 'options_id'.`,
+          { id_product_store, options: out },
+        );
+      } catch (e) {
+        return errResult(`Error obtenint les opcions: ${(e as Error).message}`);
       }
     },
   );

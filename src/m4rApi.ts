@@ -185,6 +185,30 @@ export async function getExchangeRate(apiBase: string, from: string, to: string)
   }
 }
 
+// ---------------------------------------------------------------------------
+// Opcions/extres d'un producte (descoberta). Endpoint existent i lleuger:
+// GET /details/options/{id_product_store} → totes les opcions actives del producte.
+// El preu ve en la moneda del producte; type 1 = fix, altrament = per dia.
+// La reserva (create_booking) recalcula i valora al servidor; aquí és només informatiu.
+// ---------------------------------------------------------------------------
+export interface ProductOption {
+  id: number; // product_options.id → això és el que va a create_booking com options_id
+  name: string;
+  price: number;
+  type: number; // 1 = preu fix; altrament = preu × dies
+}
+
+export async function getProductOptions(apiBase: string, idProductStore: number): Promise<ProductOption[]> {
+  const body = unwrapBody(await getJson(`${apiBase}/details/options/${idProductStore}`, DEFAULT_TIMEOUT_MS));
+  const rows: any[] = Array.isArray(body?.response) ? body.response : [];
+  return rows.map((r) => ({
+    id: Number(r.id),
+    name: String(r.name ?? "Opció"),
+    price: Number(r.price ?? 0),
+    type: Number(r.type ?? 0),
+  }));
+}
+
 export interface DetailsArgs {
   idProductStore: number;
   idStore: number;
