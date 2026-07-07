@@ -68,6 +68,32 @@ Resposta a 3 dubtes previs a executar `docs/fase-3a-proves-e2e.md`.
 ### Pas 5 — OK (guardrail 409)
 - Amb `hasStripeSplitPayments=1` al supplier id=1, `POST /ai/checkout` amb `559/76/0` (finestra divendres 23-23h) → **409 `{"status":"fallback_deeplink","error":"supplier_requires_full_checkout"}`**. PASS. (Nota clau: el guardrail cerca el supplier per **UUID** del producte, no per l'id enter — la botiga 63 de Manresa és del supplier id=6, no del id=1.)
 
+### E2E de MONEDA (nova millora — pendent de provar amb pagament real)
+Provar que reservar en una moneda no-EUR converteix bé i Stripe cobra en aquella moneda. **Fer-ho en entorn DEV/TEST** (`ENVIRONMENT=development` → Stripe TEST); NO a producció (cobraria de veritat).
+
+Target: Sevilla, supplier id=1, finestra divendres 23-23h (flags del supplier a 0). `WEB`/`SECRET` com sempre.
+
+1. **Monedes actives (dinàmic):**
+   ```bash
+   curl -s "$API/exchange/rates-to-eur" | python3 -m json.tool   # → USD, GBP, CNY, AUD, NZD, JPY, EUR
+   ```
+2. **Base EUR** (sense currency) — anota el `total`:
+   ```bash
+   curl -s -X POST "$WEB/ai/checkout" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' -d '{
+     "id_product":559,"id_store":76,"id_virtual":0,"start":"2026-07-24","end":"2026-07-24","sh":"2300","eh":"2300","locale":"es",
+     "customer":{"firstName":"Test","lastName":"EUR","email":"test@motion4rent.com","phone":"600000000","prefix":"+34","country":"ES"}}' | python3 -m json.tool
+   ```
+3. **USD** — el `total` ha de ser `base_EUR × rate(EUR→USD)`:
+   ```bash
+   # afegint  "currency":"USD"  al mateix body
+   ```
+   **PASS:** `currency:"USD"`, `total` convertit; hold a BD amb `currency_customer=USD`, `currency_supplier=EUR`, `currecy_change_to_eur=rateReal(USD→EUR)`.
+4. **Moneda no activa** → `{"currency":"XYZ"}` ha de tornar **400 `currency_not_supported`**.
+5. **Pagament real (Stripe TEST):** obrir el `urlTpv` de la reserva USD, pagar amb `4242…`, i confirmar via el webhook (manual en dev: `/stripe/webhook?type=checkout.session.completed&id=<inc>`) que passa a `pending_confirm`/`accept` i que **Stripe registra la càrrega en USD**. ⚠️ Aquest últim punt (càrrega real en la moneda) és el que encara NO s'ha validat.
+6. **MCP:** `list_currencies` (via Inspector) retorna la llista; `create_booking` amb `currency:"USD"` retorna `payment_link` + desglossament en USD.
+
+Verificat fins al pas 4 (Docker local): EUR total=10 → USD total=12.22 (×1.222166); hold `currency_customer=USD/supplier=EUR/change=0.86`; XYZ→400. **Pendent: pas 5 (pagament real en USD).**
+
 ### Pas 6 — OK (confiat)
 - No es valida explícitament: el cron `delete-old-holds.php` és infra preexistent i provada; els holds IA porten `utm_source="mcp"` (marcador ja documentat al CLAUDE.md). Els holds orfes de test (`1000041734`, `1000041735`, Manresa) els expirarà el cron.
 

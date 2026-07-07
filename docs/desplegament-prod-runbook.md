@@ -142,5 +142,7 @@ Nota: si estan en pla **free amb Bot Fight Mode** (no Super), no es pot acotar p
 - ChatGPT: afegir com a app/connector amb la mateixa URL + token.
 
 ## 8) Després (fase següent)
-- Provar una reserva real des de Claude/ChatGPT contra el producte de proves de Sevilla (supplier id=1, finestra divendres 23-23h) — encara en Stripe TEST.
-- Només llavors: **Stripe TEST → LIVE** (claus `sk_live_…`, webhook LIVE) al web de prod.
+- Registrar el connector i verificar `tools/list` (inclou `create_booking` + `list_currencies`).
+- **⚠️ Stripe LIVE NO és un interruptor manual:** el web tria la clau segons `ENVIRONMENT` (`config/autoload/stripe.global.php`): `development` → `STRIPE_SECRET_KEY_TEST` (links `cs_test_…`); qualsevol altre valor → `STRIPE_SECRET_KEY` (**LIVE, diners reals**). El web de **producció** ja corre amb ENVIRONMENT de prod → el `urlTpv` que genera el MCP de producció **JA és LIVE**. No cal cap "pas a LIVE".
+- **Conseqüència per a proves:** NO facis reserves de prova amb pagament real contra producció (cobraria). Prova el flux (inclòs el de moneda) al **Docker local / staging amb `ENVIRONMENT=development`** (Stripe TEST). Si vols un smoke test a producció: genera el link sense pagar, o paga el producte de Sevilla (1-10€) i **reemborsa'l** a Stripe.
+- El **webhook** de producció arriba sol de Stripe (no cal el replay manual, que és només per a dev).
