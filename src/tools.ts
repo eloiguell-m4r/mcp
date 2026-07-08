@@ -13,6 +13,7 @@ import {
   geocodeCity,
   searchResults,
   getDetails,
+  getProductLoad,
   createBooking,
   getActiveCurrencies,
   getExchangeRate,
@@ -247,9 +248,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
 
         const productsOut = await Promise.all(
           shown.map(async (p) => {
-            let detail: Awaited<ReturnType<typeof getDetails>> = null;
-            try {
-              detail = await getDetails(config.apiBaseUrl, {
+            // /details → preu/lliurament/pickup/cancel·lació (amb fees). products/load → MODEL + specs reals.
+            // (el model i les specs "de veritat" NO són a /details; viuen a products/load, com al web).
+            const [detail, load] = await Promise.all([
+              getDetails(config.apiBaseUrl, {
                 idProductStore: p.id_product_store ?? 0,
                 idStore: p.id_store ?? 0,
                 idVirtual: p.id_virtual ?? 0,
@@ -261,10 +263,16 @@ export function registerTools(server: McpServer, config: AppConfig): void {
                 // Recàrrec de dia festiu detectat per la cerca → preu del detall correcte (inclou closed_price).
                 pickupClosedService: p.pickup_closed_service,
                 deliveryClosedService: p.delivery_closed_service,
-              });
-            } catch {
-              /* fallback sota */
-            }
+              }).catch(() => null),
+              getProductLoad(config.apiBaseUrl, {
+                idProductStore: p.id_product_store ?? 0,
+                idVirtual: p.id_virtual ?? 0,
+                typeAtt: p.type_att ?? 0,
+                radius: p.radius ?? 0,
+                sameCity: p.same_city ?? 1,
+                idVirtualReal: p.id_virtual_real ?? 0,
+              }).catch(() => null),
+            ]);
             const src = (detail?.currency ?? p.currency ?? "EUR").toUpperCase();
             const rate = await rateFor(src);
             // Preu EXACTE de /details (amb fee de gestió). Fallback: base de cerca + fee de gestió.
@@ -274,7 +282,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
                 : p.total != null
                   ? p.total + config.managementFeeEur + (p.store_extra_fee ?? 0)
                   : null;
-            const model = detail ? [detail.brand, detail.model].filter(Boolean).join(" ").trim() : "";
+            // MODEL: prioritza products/load (brand+model reals), després /details, després el tipus genèric.
+            const model =
+              load?.title ||
+              (detail ? [detail.brand, detail.model].filter(Boolean).join(" ").trim() : "");
             const conv = (v: number | null | undefined) =>
               v == null ? null : Math.round(v * rate * 100) / 100;
             // Resum d'opcions de lliurament (com el bloc "Delivery & pickup" del web).
@@ -292,16 +303,17 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               id_product_store: p.id_product_store,
               id_store: p.id_store,
               id_virtual: p.id_virtual,
-              name: model || detail?.name || p.name, // MODEL si n'hi ha (el 'name' sol ser el tipus genèric)
-              type: detail?.type ?? null,
-              attributes: detail?.attributes ?? [], // specs clau (pes màx, plegable, dimensions…) com els badges del web
+              name: model || detail?.name || p.name, // MODEL (brand+model) si n'hi ha; si no, el tipus genèric
+              type: detail?.type ?? p.name, // categoria (p. ex. "Electric wheelchair"), útil com a subtítol
+              // Specs riques de products/load (pes màx, autonomia, plegable, tipus…) com els badges del web.
+              attributes: (load?.attributes?.length ? load.attributes : detail?.attributes) ?? [],
               rating: detail?.rating ?? null,
               reviews: detail?.reviews ?? null,
               total: exact != null ? Math.round(exact * rate * 100) / 100 : null,
               price_per_day: conv(detail?.price_per_day),
               days: detail?.days ?? null,
               currency: target || src,
-              image_url: productImageUrl(config.productImageBase, p.image),
+              image_url: productImageUrl(config.productImageBase, load?.image || p.image),
               delivery_options, // ofereix NOMÉS aquestes (les altres no estan disponibles per aquest article)
               free_cancellation_until: freeCancellationUntil(start_date, p.cancellation_days, p.cancellation_refundable),
               cancellation_refundable: p.cancellation_refundable,
@@ -411,6 +423,18 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           });
         }
 
+        // MODEL + specs reals (brand/model, pes màx, autonomia…) vénen de products/load, no de /details.
+        const load =
+          detail.type_att != null
+            ? await getProductLoad(config.apiBaseUrl, {
+                idProductStore: id_product_store,
+                idVirtual: id_virtual,
+                typeAtt: detail.type_att,
+                sameCity: detail.same_city ?? 1,
+                idVirtualReal: detail.id_virtual_real ?? 0,
+              }).catch(() => null)
+            : null;
+
         // Currency: convert with the same 'rate' as booking (1 if not requested or same). Deposit is NOT
         // converted (the preauthorization is held in the supplier's currency).
         const target = (currency ?? "").trim().toUpperCase();
@@ -443,8 +467,9 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           });
         }
 
-        const imageUrl = productImageUrl(config.productImageBase, detail.image);
-        const modelName = [detail.brand, detail.model].filter(Boolean).join(" ").trim();
+        const imageUrl = productImageUrl(config.productImageBase, load?.image || detail.image);
+        const modelName = load?.title || [detail.brand, detail.model].filter(Boolean).join(" ").trim();
+        const specAttributes = (load?.attributes?.length ? load.attributes : detail.attributes) ?? [];
         const out = {
           provider: "Motion4Rent",
           product: {
@@ -452,6 +477,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             name: modelName || detail.name,
             model: modelName || null,
             type: detail.type,
+            attributes: specAttributes, // specs riques (pes màx, autonomia, plegable, tipus…)
             image_url: imageUrl,
           },
           price: {
@@ -476,7 +502,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           note:
             "price.total is the EXACT amount charged (base + management fee + taxes; matches the search 'total'). Quote it " +
             "as-is; do NOT add or estimate extra fees. Delivery/options are added on top and any discount applied " +
-            "server-side at booking. When presenting the details, INCLUDE the product photo as a clickable markdown image " +
+            "server-side at booking. Present the product 'name' (the real model) and its 'attributes' (specs: max weight, " +
+            "range, folding, type…). When presenting the details, INCLUDE the product photo as a clickable markdown image " +
             "![name](image_url). Do NOT reveal the store name; show only a 'View location' link (map_url). Do NOT show " +
             "internal ids. Offer only these delivery_options.",
         };

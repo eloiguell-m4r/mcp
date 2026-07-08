@@ -97,6 +97,11 @@ export interface Producto {
   cancellation_name: string | null;
   cancellation_days: number | null;
   cancellation_refundable: number | null;
+  // Paràmetres per a products/load (model + specs reals): id_product_store va com a :id_product.
+  type_att: number | null;
+  same_city: number | null;
+  id_virtual_real: number | null;
+  radius: number | null;
 }
 
 export interface TipoProducto {
@@ -151,6 +156,10 @@ export async function searchResults(apiBase: string, a: SearchArgs): Promise<Sea
     cancellation_name: it.cancellation_name ?? null,
     cancellation_days: it.cancellation_days != null ? Number(it.cancellation_days) : null,
     cancellation_refundable: it.cancellation_refundable != null ? Number(it.cancellation_refundable) : null,
+    type_att: it.type_att_product != null ? Number(it.type_att_product) : null,
+    same_city: it.same_city != null ? Number(it.same_city) : null,
+    id_virtual_real: it.virtualStoreReal != null ? Number(it.virtualStoreReal) : null,
+    radius: it.radius != null ? Number(it.radius) : null,
   }));
   const typesProducts: TipoProducto[] = Array.isArray(body?.typesProducts)
     ? body.typesProducts
@@ -254,6 +263,9 @@ export interface DetallProducto {
   airports: Array<{ place_id: string; name: string; price: number | null }>; // lliurament a aeroport (buit si no n'hi ha)
   store_name: string | null; // nom de la botiga (per presentar; MAI l'id intern)
   store_place_id: string | null; // per construir l'enllaç de mapa
+  type_att: number | null; // type_att_product → per a products/load (model + specs reals)
+  same_city: number | null;
+  id_virtual_real: number | null;
   image: string | null; // filename (usar productImageUrl per a la URL pública)
   cancellation: {
     name: string | null;
@@ -308,9 +320,9 @@ function num(v: unknown): number | null {
  * Les specs (pes/autonomia) NO venen a /details (viuen a /products/load) → no s'hi inclouen;
  * per a specs generals hi ha la tool mobility_policies (peso_capacidad).
  */
-/** Extreu les specs clau (pes màx, plegable, dimensions…) de details._children[].attributes. */
-function extractAttributes(p: any): Array<{ label: string; value: string }> {
-  const out: Array<{ label: string; value: string }> = [];
+/** Recull tots els atributs (code/label/value) de details._children[].attributes, deduplicats per code. */
+function collectAttributes(p: any): Array<{ code: string; label: string; value: string }> {
+  const out: Array<{ code: string; label: string; value: string }> = [];
   const seen = new Set<string>();
   const children = Array.isArray(p?._children) ? p._children : [];
   for (const child of children) {
@@ -318,18 +330,22 @@ function extractAttributes(p: any): Array<{ label: string; value: string }> {
     for (const grp of groups) {
       const attrs = Array.isArray(grp) ? grp : [grp];
       for (const a of attrs) {
+        const code = String(a?.code ?? "").trim();
         const label = String(a?.label ?? "").trim();
         const raw = a?.value;
         const value = raw === null || raw === undefined ? "" : String(raw).trim();
-        if (!label || !value || seen.has(label)) continue;
-        seen.add(label);
-        out.push({ label, value });
-        if (out.length >= 10) return out; // prou per a una fitxa rica sense soroll
+        const key = code || label;
+        if (!value || !key || seen.has(key)) continue;
+        seen.add(key);
+        out.push({ code, label, value });
       }
     }
   }
   return out;
 }
+
+/** Codes d'atribut que són el nom del model, no una spec (no s'han de repetir com a badge). */
+const MODEL_ATTR_CODES = new Set(["brand", "model", "name"]);
 
 export function normalizeDetails(raw: any): DetallProducto | null {
   const body = raw;
@@ -342,18 +358,30 @@ export function normalizeDetails(raw: any): DetallProducto | null {
   const rating = num(d.score ?? p.score);
   const reviews = num(d.review ?? p.review);
 
+  // brand/model vénen com ATRIBUTS (code 'brand'/'model'), igual que getData() al web; el camp
+  // top-level p.brand/p.model sol ser buit. Fallback al top-level per si de cas.
+  const allAttrs = collectAttributes(p);
+  const attrByCode = (c: string) => allAttrs.find((a) => a.code === c)?.value || null;
+  const brand = attrByCode("brand") ?? (p.brand || null);
+  const model = attrByCode("model") ?? (p.model || null);
+  // Specs a mostrar com a badges: tot menys els codes que ja formen el nom del model.
+  const specAttributes = allAttrs
+    .filter((a) => !MODEL_ATTR_CODES.has(a.code))
+    .slice(0, 10)
+    .map(({ label, value }) => ({ label, value }));
+
   return {
     name: p.name ?? p.title ?? p.type_product ?? d.name ?? null,
     type: p.type_product ?? d.type_product ?? null,
-    brand: (p.brand ?? null) || null,
-    model: (p.model ?? null) || null,
+    brand,
+    model,
     // PREU AMB FEES (d.total = base + feeGestionM4R + extraM4R + extraSup) — el que cobra la reserva i el web.
     // NO usar totalWithOutExtra (base): infravaloraria ~9€+. d.total ≥ booking (el descompte només abaixa).
     price_total: priceTotal,
     price_per_day: priceTotal != null && days && days > 0 ? Math.round((priceTotal / days) * 100) / 100 : priceTotal,
     rating: rating && rating > 0 ? rating : null,
     reviews: reviews && reviews > 0 ? reviews : null,
-    attributes: extractAttributes(p),
+    attributes: specAttributes,
     currency: d.currency ?? null,
     days,
     prepayment_percent: num(d.prepayment),
@@ -366,6 +394,9 @@ export function normalizeDetails(raw: any): DetallProducto | null {
     is_virtual: (num(d.id_virtual) ?? 0) > 0,
     store_name: (body?.store?.name ?? null) || null,
     store_place_id: (body?.store?.place_id ?? null) || null,
+    type_att: num(d.type_att_product),
+    same_city: num(d.same_city),
+    id_virtual_real: num(d.id_virtual_real),
     airports:
       num(p.airport_delivery) && Array.isArray(p.airports_list)
         ? p.airports_list.map((a: any) => ({
@@ -531,4 +562,64 @@ export async function getDetails(apiBase: string, a: DetailsArgs): Promise<Detal
     `/${a.start}/${a.end}/${sh}/${eh}/${encodeURIComponent(a.locale)}` +
     (q.toString() ? `?${q.toString()}` : "");
   return normalizeDetails(unwrapBody(await getJson(url, SEARCH_TIMEOUT_MS)));
+}
+
+// ---------------------------------------------------------------------------
+// products/load: el MODEL (brand/model) i les specs REALS (pes màx, autonomia,
+// plegable, tipus, material…) viuen aquí, NO a /details (que torna les dimensions
+// del fill). És l'endpoint que fa servir el web (loadProductAction → getData).
+// El path :id_product és en realitat stores_products.id (= id_product_store).
+// ---------------------------------------------------------------------------
+export interface ProductLoad {
+  brand: string | null;
+  model: string | null;
+  title: string | null; // brand + model (el títol que mostra el web)
+  image: string | null; // filename de la imatge real del producte
+  attributes: Array<{ label: string; value: string }>;
+}
+
+/** Codes d'atribut que NO són specs a mostrar (imatges, dipòsit i el propi nom/model). */
+const LOAD_ATTR_HIDE = new Set(["image", "image2", "image3", "bail", "brand", "model", "name"]);
+
+export interface ProductLoadArgs {
+  idProductStore: number | string;
+  idVirtual: number | string;
+  typeAtt: number | string;
+  radius?: number | string;
+  sameCity?: number | string;
+  idVirtualReal?: number | string;
+}
+
+export async function getProductLoad(apiBase: string, a: ProductLoadArgs): Promise<ProductLoad | null> {
+  const radius = a.radius ?? 0;
+  const sameCity = a.sameCity ?? 1;
+  const idVirtualReal = a.idVirtualReal ?? 0;
+  const url = `${apiBase}/products/load/${a.idProductStore}/${a.idVirtual}/${radius}/${a.typeAtt}/${sameCity}/${idVirtualReal}`;
+  const body = unwrapBody(await getJson(url, SEARCH_TIMEOUT_MS));
+  const row = Array.isArray(body?.data) ? body.data[0] : null;
+  if (!row || typeof row !== "object") return null;
+
+  const map = new Map<string, { label: string; value: string }>();
+  for (const grp of Array.isArray(row.attributes) ? row.attributes : []) {
+    const attrs = Array.isArray(grp) ? grp : [grp];
+    for (const at of attrs) {
+      const code = String(at?.code ?? "").trim();
+      const label = String(at?.label ?? "").trim();
+      let raw: any = at?.value;
+      if (Array.isArray(raw)) raw = raw.join(", ");
+      if (at?.type === "yesno") raw = String(raw) === "1" ? "Yes" : String(raw) === "0" ? "No" : raw;
+      const value = raw === null || raw === undefined ? "" : String(raw).trim();
+      if (!code || !value || map.has(code)) continue;
+      map.set(code, { label: label || code, value });
+    }
+  }
+  const brand = map.get("brand")?.value || null;
+  const model = map.get("model")?.value || null;
+  const title = [brand, model].filter(Boolean).join(" ").trim() || null;
+  const image = map.get("image")?.value || row.image || null;
+  const attributes = [...map.entries()]
+    .filter(([code]) => !LOAD_ATTR_HIDE.has(code))
+    .slice(0, 12)
+    .map(([, v]) => v);
+  return { brand, model, title, image, attributes };
 }
