@@ -32,6 +32,12 @@ export const config = {
   productImageBase: (process.env.PRODUCT_IMAGE_BASE ?? "https://d3alzpqy0fqlq2.cloudfront.net/products/cache/w800")
     .trim()
     .replace(/\/+$/, ""),
+  /**
+   * Fee de gestió M4R base (EUR) que /details i el booking sumen al preu (feeGestionM4R = aquest + store.extra_fee),
+   * però que l'API de cerca NO inclou. El sumem al preu de la cerca perquè el llistat mostri el preu FINAL.
+   * Ha de coincidir amb el valor del web (motion4rent-api/routes/details.js). Si allà canvia, actualitza'l aquí.
+   */
+  managementFeeEur: Number(process.env.M4R_MANAGEMENT_FEE_EUR ?? 9) || 9,
 };
 
 export type AppConfig = typeof config;

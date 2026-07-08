@@ -88,9 +88,10 @@ export interface Producto {
   id_store: number | null;
   id_virtual: number | null;
   name: string;
-  total: number | null; // preu total per al rang de dates
+  total: number | null; // preu BASE del rang (sense el fee de gestió; la cerca no l'inclou)
   currency: string | null;
   image: string | null;
+  store_extra_fee: number | null; // part variable del fee de gestió (store.extra_fee); base + això = feeGestionM4R
   cancellation_name: string | null;
   cancellation_days: number | null;
   cancellation_refundable: number | null;
@@ -142,6 +143,7 @@ export async function searchResults(apiBase: string, a: SearchArgs): Promise<Sea
     total: it.total != null ? Number(it.total) : (it.price != null ? Number(it.price) : null),
     currency: it.currency ?? null,
     image: it.image ?? null,
+    store_extra_fee: it.extra_fee != null ? Number(it.extra_fee) : null,
     cancellation_name: it.cancellation_name ?? null,
     cancellation_days: it.cancellation_days != null ? Number(it.cancellation_days) : null,
     cancellation_refundable: it.cancellation_refundable != null ? Number(it.cancellation_refundable) : null,
