@@ -301,7 +301,9 @@ export function normalizeDetails(raw: any): DetallProducto | null {
   return {
     name: p.name ?? p.title ?? p.type_product ?? d.name ?? null,
     type: p.type_product ?? d.type_product ?? null,
-    price_total: num(d.totalWithOutExtra ?? d.total ?? d.price),
+    // PREU AMB FEES (d.total = base + feeGestionM4R + extraM4R + extraSup) — el que cobra la reserva i el web.
+    // NO usar totalWithOutExtra (base): infravaloraria ~9€+. d.total ≥ booking (el descompte només abaixa).
+    price_total: num(d.total ?? d.totalWithOutExtra ?? d.price),
     currency: d.currency ?? null,
     days: num(body?.days ?? d.days),
     prepayment_percent: num(d.prepayment),

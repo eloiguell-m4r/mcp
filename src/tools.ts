@@ -90,7 +90,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       title: "Search mobility rentals (Motion4Rent)",
       description:
         "Search available Motion4Rent mobility equipment (wheelchairs, scooters, etc.) in a city and date range, " +
-        "with total price per product and a photo (image_url). Also returns a LINK to the website where the user can " +
+        "with an INDICATIVE 'from' price per product (price_from — base, excludes the mandatory management fee; get the " +
+        "exact total from get_rental_details) and a photo (image_url). Also returns a LINK to the website where the user can " +
         "complete delivery, options and payment (this tool does NOT book or charge). If the city name is a homonym " +
         "across countries, pass 'country'.",
       inputSchema: {
@@ -191,8 +192,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         }
 
         const truncated = search.productos.length > MAX_PRODUCTS;
-        const productsOut = productos.map((p) => ({
+        // 'total' de la cerca és el preu BASE (sense el fee de gestió ~9€ ni algunes taxes) → indicatiu.
+        // El reanomenem a 'price_from' perquè NO es presenti com a preu final; l'exacte ve de get_rental_details.
+        const productsOut = productos.map(({ total, ...p }) => ({
           ...p,
+          price_from: total,
           image_url: productImageUrl(config.productImageBase, p.image),
         }));
         const summary =
@@ -212,10 +216,12 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
-            "These rentals are offered by MOTION4RENT. Present each product with its photo as a clickable image using " +
-            "markdown ![name](image_url) so the user can view it (the client shows external images on one click). Do NOT " +
-            "show internal ids (id_product_store/id_store) or the store name. For full detail (map link, delivery, extras) " +
-            "call get_rental_details with these ids. Payment happens on the website or via create_booking.",
+            "These rentals are offered by MOTION4RENT. ⚠️ 'price_from' is an INDICATIVE base price and does NOT include " +
+            "the mandatory management fee (~9€/booking) — present it as an approximate 'from' price, NEVER as the final " +
+            "total. To quote a FINAL price or before booking, ALWAYS call get_rental_details (its price.total is the exact " +
+            "amount charged). Present a COMPLETE, rich listing for each option (name, 'from' price, photo, and a short line " +
+            "of key info like cancellation) — do NOT be terse. Show the photo as a clickable markdown image ![name](image_url). " +
+            "Do NOT show internal ids (id_product_store/id_store) or the store name. Payment via create_booking or the website.",
           truncated,
         });
       } catch (e) {
@@ -325,10 +331,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           cancellation: detail.cancellation,
           days: detail.days,
           note:
-            "When presenting the details, INCLUDE the product photo as a clickable markdown image ![name](image_url) " +
-            "(the client shows external images on one click). Do NOT reveal the store name; show only a 'View location' " +
-            "link (map_url). Do NOT show internal ids. Offer only these delivery_options. The final total " +
-            "(delivery/options/currency) is recomputed server-side at booking.",
+            "price.total is the EXACT amount charged (base + mandatory management fee + taxes) — quote THIS, not the " +
+            "search 'price_from'. Any discount and the delivery/options are applied on top server-side at booking. " +
+            "When presenting the details, INCLUDE the product photo as a clickable markdown image ![name](image_url). " +
+            "Do NOT reveal the store name; show only a 'View location' link (map_url). Do NOT show internal ids. Offer " +
+            "only these delivery_options.",
         };
         const summary =
           `Motion4Rent — "${detail.name ?? "product"}" (prices in ${displayCurrency}). ` +
