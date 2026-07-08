@@ -237,8 +237,12 @@ export interface DetallProducto {
   brand: string | null; // marca (per distingir models; el nom sol ser genèric per tipus)
   model: string | null; // model
   price_total: number | null; // totalWithOutExtra (preu base del rang)
+  price_per_day: number | null; // preu final / dies (per mostrar "X/dia" com el web)
   currency: string | null;
   days: number | null;
+  rating: number | null; // valoració mitjana (score, 0-5); null si no en té
+  reviews: number | null; // nombre de ressenyes; null si 0
+  attributes: Array<{ label: string; value: string }>; // specs clau (pes màx, plegable, dimensions…)
   prepayment_percent: number | null;
   discount_percent: number | null;
   deposit: number | null; // fiança reembolsable (data[0].bail); null si no n'hi ha
@@ -304,11 +308,39 @@ function num(v: unknown): number | null {
  * Les specs (pes/autonomia) NO venen a /details (viuen a /products/load) → no s'hi inclouen;
  * per a specs generals hi ha la tool mobility_policies (peso_capacidad).
  */
+/** Extreu les specs clau (pes màx, plegable, dimensions…) de details._children[].attributes. */
+function extractAttributes(p: any): Array<{ label: string; value: string }> {
+  const out: Array<{ label: string; value: string }> = [];
+  const seen = new Set<string>();
+  const children = Array.isArray(p?._children) ? p._children : [];
+  for (const child of children) {
+    const groups = Array.isArray(child?.attributes) ? child.attributes : [];
+    for (const grp of groups) {
+      const attrs = Array.isArray(grp) ? grp : [grp];
+      for (const a of attrs) {
+        const label = String(a?.label ?? "").trim();
+        const raw = a?.value;
+        const value = raw === null || raw === undefined ? "" : String(raw).trim();
+        if (!label || !value || seen.has(label)) continue;
+        seen.add(label);
+        out.push({ label, value });
+        if (out.length >= 10) return out; // prou per a una fitxa rica sense soroll
+      }
+    }
+  }
+  return out;
+}
+
 export function normalizeDetails(raw: any): DetallProducto | null {
   const body = raw;
   const d = Array.isArray(body?.data) ? body.data[0] : (body?.data ?? body);
   if (!d || typeof d !== "object") return null;
   const p = d.details ?? {}; // el producte
+
+  const priceTotal = num(d.total ?? d.totalWithOutExtra ?? d.price);
+  const days = num(body?.days ?? d.days);
+  const rating = num(d.score ?? p.score);
+  const reviews = num(d.review ?? p.review);
 
   return {
     name: p.name ?? p.title ?? p.type_product ?? d.name ?? null,
@@ -317,9 +349,13 @@ export function normalizeDetails(raw: any): DetallProducto | null {
     model: (p.model ?? null) || null,
     // PREU AMB FEES (d.total = base + feeGestionM4R + extraM4R + extraSup) — el que cobra la reserva i el web.
     // NO usar totalWithOutExtra (base): infravaloraria ~9€+. d.total ≥ booking (el descompte només abaixa).
-    price_total: num(d.total ?? d.totalWithOutExtra ?? d.price),
+    price_total: priceTotal,
+    price_per_day: priceTotal != null && days && days > 0 ? Math.round((priceTotal / days) * 100) / 100 : priceTotal,
+    rating: rating && rating > 0 ? rating : null,
+    reviews: reviews && reviews > 0 ? reviews : null,
+    attributes: extractAttributes(p),
     currency: d.currency ?? null,
-    days: num(body?.days ?? d.days),
+    days,
     prepayment_percent: num(d.prepayment),
     discount_percent: num(d.percent_discount),
     deposit: num(d.bail),
