@@ -92,6 +92,8 @@ export interface Producto {
   currency: string | null;
   image: string | null;
   store_extra_fee: number | null; // part variable del fee de gestió (store.extra_fee); base + això = feeGestionM4R
+  pickup_closed_service: boolean; // recollida/tornada en dia festiu → recàrrec closed_price
+  delivery_closed_service: boolean; // lliurament en dia festiu → recàrrec closed_price
   cancellation_name: string | null;
   cancellation_days: number | null;
   cancellation_refundable: number | null;
@@ -144,6 +146,8 @@ export async function searchResults(apiBase: string, a: SearchArgs): Promise<Sea
     currency: it.currency ?? null,
     image: it.image ?? null,
     store_extra_fee: it.extra_fee != null ? Number(it.extra_fee) : null,
+    pickup_closed_service: Number(it.pickup_closed_service ?? 0) === 1,
+    delivery_closed_service: Number(it.delivery_closed_service ?? 0) === 1,
     cancellation_name: it.cancellation_name ?? null,
     cancellation_days: it.cancellation_days != null ? Number(it.cancellation_days) : null,
     cancellation_refundable: it.cancellation_refundable != null ? Number(it.cancellation_refundable) : null,
@@ -222,6 +226,9 @@ export interface DetailsArgs {
   locale: string;
   lat?: string;
   lon?: string;
+  /** Recàrrec servei en dia festiu (de la cerca): recollida/tornada en dia tancat. Sense això /details el posa a 0. */
+  pickupClosedService?: boolean;
+  deliveryClosedService?: boolean;
 }
 
 export interface DetallProducto {
@@ -381,6 +388,9 @@ export interface CreateBookingArgs {
   airportPlaceId?: string;
   /** Nº de vol (obligatori si deliveryType 5). */
   flightNumber?: string;
+  /** Recàrrec dia festiu (de la cerca): recollida/tornada / lliurament en dia tancat. */
+  pickupClosedService?: boolean;
+  deliveryClosedService?: boolean;
 }
 
 export interface BookingResult {
@@ -429,6 +439,8 @@ export async function createBooking(
     hotel_name: a.hotelName ?? "",
     airport_place_id: a.airportPlaceId ?? "",
     flight_number: a.flightNumber ?? "",
+    pickup_closed_service: a.pickupClosedService ? 1 : 0,
+    delivery_closed_service: a.deliveryClosedService ? 1 : 0,
   };
 
   const ctrl = new AbortController();
@@ -473,6 +485,9 @@ export async function getDetails(apiBase: string, a: DetailsArgs): Promise<Detal
   const q = new URLSearchParams();
   if (a.lat) q.set("lat", a.lat);
   if (a.lon) q.set("lon", a.lon);
+  // Recàrrec de dia festiu: passem els flags de la cerca perquè /details inclogui el closed_price.
+  if (a.pickupClosedService) q.set("pickup_closed_service", "1");
+  if (a.deliveryClosedService) q.set("delivery_closed_service", "1");
   const url =
     `${apiBase}/details/${a.idProductStore}/${a.idStore}/${a.idVirtual}` +
     `/${a.start}/${a.end}/${sh}/${eh}/${encodeURIComponent(a.locale)}` +

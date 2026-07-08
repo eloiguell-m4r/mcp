@@ -201,6 +201,9 @@ export function registerTools(server: McpServer, config: AppConfig): void {
                 sh: toApiTime(pickup_time),
                 eh: toApiTime(return_time),
                 locale,
+                // Recàrrec de dia festiu detectat per la cerca → preu del detall correcte (inclou closed_price).
+                pickupClosedService: p.pickup_closed_service,
+                deliveryClosedService: p.delivery_closed_service,
               });
             } catch {
               /* fallback sota */
@@ -226,6 +229,9 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               image_url: productImageUrl(config.productImageBase, p.image),
               cancellation_refundable: p.cancellation_refundable,
               cancellation_days: p.cancellation_days,
+              // Flags de dia festiu: cal passar-los a create_booking perquè cobri el recàrrec correcte.
+              pickup_closed_service: p.pickup_closed_service ? 1 : 0,
+              delivery_closed_service: p.delivery_closed_service ? 1 : 0,
             };
           }),
         );
@@ -253,7 +259,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             "'from'/'approx'. Present a COMPLETE, rich listing for each option (name, price, photo, and a short line of key " +
             "info like cancellation) — do NOT be terse. Show the photo as a clickable markdown image ![name](image_url). " +
             "Do NOT show internal ids (id_product_store/id_store) or the store name. For delivery/extras or the exact " +
-            "breakdown, call get_rental_details (its price.total matches this 'total'). Payment via create_booking or the website.",
+            "breakdown, call get_rental_details (its price.total matches this 'total'). ⚠️ Each product carries " +
+            "pickup_closed_service/delivery_closed_service (holiday surcharge, already reflected in 'total'): you MUST forward " +
+            "these SAME values to get_rental_details and create_booking for that product, or the price/charge will be wrong " +
+            "on holidays. Payment via create_booking or the website.",
           truncated,
         });
       } catch (e) {
@@ -287,9 +296,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           .describe("Currency to display prices in (one from list_currencies, e.g. 'USD'). Optional; defaults to product currency. [test: USD]"),
         pickup_time: z.string().optional().describe("Pickup time HH:MM. ALWAYS ask the user; affects availability/price. [test: 23:00]"),
         return_time: z.string().optional().describe("Return time HH:MM. ALWAYS ask the user. [test: 23:00]"),
+        pickup_closed_service: z.number().optional().describe("Passa el valor de search (0/1). Recàrrec dia festiu; imprescindible per al preu correcte."),
+        delivery_closed_service: z.number().optional().describe("Passa el valor de search (0/1). Recàrrec dia festiu."),
       },
     },
-    async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency, pickup_time, return_time }) => {
+    async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency, pickup_time, return_time, pickup_closed_service, delivery_closed_service }) => {
       try {
         const [detail, options] = await Promise.all([
           getDetails(config.apiBaseUrl, {
@@ -301,6 +312,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             sh: toApiTime(pickup_time),
             eh: toApiTime(return_time),
             locale: apiLocale(language ?? "en"),
+            pickupClosedService: pickup_closed_service === 1,
+            deliveryClosedService: delivery_closed_service === 1,
           }),
           getProductOptions(config.apiBaseUrl, id_product_store).catch(() => []),
         ]);
@@ -516,6 +529,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           end_date: DATE.describe("End date (YYYY-MM-DD). [test: 2026-07-24]"),
           pickup_time: z.string().optional().describe("Pickup time HH:MM. You MUST ask the user before booking. [test: 23:00]"),
           return_time: z.string().optional().describe("Return time HH:MM. You MUST ask the user before booking. [test: 23:00]"),
+          pickup_closed_service: z.number().optional().describe("Passa el valor de search/get_rental_details (0/1). Recàrrec dia festiu; sense això la reserva infravalora."),
+          delivery_closed_service: z.number().optional().describe("Passa el valor de search/get_rental_details (0/1). Recàrrec dia festiu."),
           customer: z
             .object({
               first_name: z.string().describe("First name. [test: Test]"),
@@ -559,7 +574,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           comments: z.string().optional().describe("Comments for the store. Optional."),
         },
       },
-      async ({ id_product_store, id_store, id_virtual, start_date, end_date, pickup_time, return_time, customer, language, currency, options_id, delivery_type, delivery_address, hotel_name, airport_place_id, flight_number, newsletter, comments }) => {
+      async ({ id_product_store, id_store, id_virtual, start_date, end_date, pickup_time, return_time, pickup_closed_service, delivery_closed_service, customer, language, currency, options_id, delivery_type, delivery_address, hotel_name, airport_place_id, flight_number, newsletter, comments }) => {
         try {
           const r = await createBooking(config.checkoutBaseUrl, config.checkoutSecret, {
             idProductStore: id_product_store,
@@ -587,6 +602,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             hotelName: hotel_name,
             airportPlaceId: airport_place_id,
             flightNumber: flight_number,
+            pickupClosedService: pickup_closed_service === 1,
+            deliveryClosedService: delivery_closed_service === 1,
           });
 
           if (r.fallbackDeeplink) {
