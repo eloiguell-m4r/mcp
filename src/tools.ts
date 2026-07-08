@@ -335,7 +335,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         // Delivery types ACTUALLY available for this product (only the ones it supports).
         // Virtual stores (id_virtual>0) deliver FREE (price 0), matching payAction/the web.
         const cityPrice = detail.is_virtual ? 0 : conv(detail.city_delivery_price) ?? 0;
-        const deliveryOptions: any[] = [{ delivery_type: 0, label: "Store pickup", price: 0, free: true }];
+        // Recollida a botiga NOMÉS si la botiga en té (les virtuals NO → només lliurament).
+        const deliveryOptions: any[] = [];
+        if (detail.pickup_available) {
+          deliveryOptions.push({ delivery_type: 0, label: "Store pickup", price: 0, free: true });
+        }
         if (detail.delivery_available) {
           deliveryOptions.push({ delivery_type: 1, label: "Home delivery", price: cityPrice, needs: ["delivery_address"] });
           deliveryOptions.push({ delivery_type: 2, label: "Hotel delivery", price: cityPrice, needs: ["delivery_address", "hotel_name?"] });

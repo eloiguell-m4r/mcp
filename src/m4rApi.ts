@@ -245,6 +245,7 @@ export interface DetallProducto {
   city_delivery_price: number | null; // preu pla de lliurament a ciutat (details.delivery_price); 0/null = pickup gratis
   delivery_available: boolean; // details.delivery>0 → admet domicili/hotel
   cruise_available: boolean; // details.cruises>0 → admet lliurament a creuer
+  pickup_available: boolean; // store.pickup>0 → hi ha recollida a botiga (les virtuals NO en tenen)
   is_virtual: boolean; // botiga virtual (id_virtual>0): el lliurament és gratis (com payAction)
   airports: Array<{ place_id: string; name: string; price: number | null }>; // lliurament a aeroport (buit si no n'hi ha)
   store_name: string | null; // nom de la botiga (per presentar; MAI l'id intern)
@@ -325,6 +326,7 @@ export function normalizeDetails(raw: any): DetallProducto | null {
     city_delivery_price: num(p.delivery_price),
     delivery_available: (num(p.delivery) ?? 0) > 0,
     cruise_available: (num(p.cruises) ?? 0) > 0,
+    pickup_available: (num(body?.store?.pickup ?? d.pickup) ?? 0) > 0,
     is_virtual: (num(d.id_virtual) ?? 0) > 0,
     store_name: (body?.store?.name ?? null) || null,
     store_place_id: (body?.store?.place_id ?? null) || null,
