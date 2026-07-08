@@ -36,6 +36,35 @@ function toApiTime(t?: string): string | undefined {
   return undefined;
 }
 
+/** Normalitza text per comparar (minúscules, sense accents ni símbols, espais col·lapsats). */
+function normText(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Nº de tokens (≥3 lletres) que comparteixen dos textos normalitzats. */
+function tokenOverlap(a: string, b: string): number {
+  const ta = new Set(a.split(" ").filter((t) => t.length >= 3));
+  const tb = new Set(b.split(" ").filter((t) => t.length >= 3));
+  let n = 0;
+  for (const t of ta) if (tb.has(t)) n++;
+  return n;
+}
+
+/** Data límit de cancel·lació gratuïta = inici − dies (YYYY-MM-DD). null si no reembolsable o falten dades. */
+function freeCancellationUntil(startDate: string, days: number | null | undefined, refundable: number | null | undefined): string | null {
+  if (!refundable || days == null || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return null;
+  const d = new Date(`${startDate}T00:00:00Z`);
+  if (isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Empaqueta un objecte com a resultat de tool (text JSON + resum llegible). */
 function jsonResult(summary: string, data: unknown) {
   return {
@@ -101,7 +130,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         product_type: z
           .string()
           .optional()
-          .describe("Free-text product type (e.g. 'electric wheelchair'). Optional; filters the link."),
+          .describe(
+            "Free-text product type (e.g. 'electric wheelchair', 'scooter'). Optional. When given, the RESULTS are " +
+              "filtered to that type and ALL matching items are returned (up to the cap), instead of a mix of every type.",
+          ),
         country: z
           .string()
           .optional()
@@ -171,10 +203,35 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           types: product_type ? [product_type] : [],
         });
 
+        // Si l'usuari demana un tipus concret (p. ex. "cadira elèctrica"), filtrem els resultats
+        // a aquest tipus. L'API retorna TOTS els tipus barrejats (scooters dominen el rànquing),
+        // així que sense filtrar només uns pocs del tipus demanat caben dins del sostre.
+        let matched = search.productos;
+        let typeFilterLabel: string | null = null;
+        if (product_type && product_type.trim()) {
+          const pt = normText(product_type);
+          // 1) Resol el tipus canònic del catàleg (typesProducts) pel millor solapament de tokens.
+          const best = search.typesProducts
+            .map((t) => ({ t, score: tokenOverlap(pt, normText(t.name ?? "")) }))
+            .filter((x) => x.score > 0)
+            .sort((a, b) => b.score - a.score)[0];
+          const targetName = best ? normText(best.t.name) : null;
+          const filtered = search.productos.filter((p) => {
+            const pn = normText(p.name ?? "");
+            return targetName ? pn === targetName : tokenOverlap(pt, pn) > 0;
+          });
+          // Només apliquem el filtre si troba coincidències (si no, val més mostrar-ho tot).
+          if (filtered.length) {
+            matched = filtered;
+            typeFilterLabel = best?.t.name ?? product_type.trim();
+          }
+        }
+
         // Enriquim cada producte mostrat amb /details (MODEL + preu EXACTE = details.total = booking = web).
-        // El model i el preu-amb-fee NO són al resultat de cerca; per això cal /details per producte (limitat).
-        const SEARCH_ENRICH_CAP = 10;
-        const shown = search.productos.slice(0, SEARCH_ENRICH_CAP);
+        // El model i el preu-amb-fee NO són al resultat de cerca; per això cal /details per producte.
+        // Sostre = MAX_PRODUCTS: mostrem TOTS els del tipus demanat (fins al sostre), no només uns pocs.
+        const shown = matched.slice(0, MAX_PRODUCTS);
+        const matchedCount = matched.length;
         const target = (currency ?? "").trim().toUpperCase();
         const rateCache = new Map<string, number>();
         const rateFor = async (src: string): Promise<number> => {
@@ -218,15 +275,35 @@ export function registerTools(server: McpServer, config: AppConfig): void {
                   ? p.total + config.managementFeeEur + (p.store_extra_fee ?? 0)
                   : null;
             const model = detail ? [detail.brand, detail.model].filter(Boolean).join(" ").trim() : "";
+            const conv = (v: number | null | undefined) =>
+              v == null ? null : Math.round(v * rate * 100) / 100;
+            // Resum d'opcions de lliurament (com el bloc "Delivery & pickup" del web).
+            const delivery_options: any[] = [];
+            if (detail?.pickup_available) delivery_options.push({ label: "Store pickup", price: 0, free: true });
+            if (detail?.delivery_available)
+              delivery_options.push({
+                label: "Home or hotel delivery & pickup",
+                price: detail.is_virtual ? 0 : conv(detail.city_delivery_price) ?? 0,
+                free: detail.is_virtual || !detail.city_delivery_price,
+              });
+            for (const ap of detail?.airports ?? [])
+              delivery_options.push({ label: `Airport delivery & pickup (${ap.name})`, price: conv(ap.price) ?? 0, free: !ap.price });
             return {
               id_product_store: p.id_product_store,
               id_store: p.id_store,
               id_virtual: p.id_virtual,
               name: model || detail?.name || p.name, // MODEL si n'hi ha (el 'name' sol ser el tipus genèric)
               type: detail?.type ?? null,
+              attributes: detail?.attributes ?? [], // specs clau (pes màx, plegable, dimensions…) com els badges del web
+              rating: detail?.rating ?? null,
+              reviews: detail?.reviews ?? null,
               total: exact != null ? Math.round(exact * rate * 100) / 100 : null,
+              price_per_day: conv(detail?.price_per_day),
+              days: detail?.days ?? null,
               currency: target || src,
               image_url: productImageUrl(config.productImageBase, p.image),
+              delivery_options, // ofereix NOMÉS aquestes (les altres no estan disponibles per aquest article)
+              free_cancellation_until: freeCancellationUntil(start_date, p.cancellation_days, p.cancellation_refundable),
               cancellation_refundable: p.cancellation_refundable,
               cancellation_days: p.cancellation_days,
               // Flags de dia festiu: cal passar-los a create_booking perquè cobri el recàrrec correcte.
@@ -236,11 +313,14 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           }),
         );
 
-        const truncated = search.number > shown.length;
+        // Recompte segons si hem filtrat per tipus: si filtrem, comptem els del tipus; si no, el total.
+        const effectiveCount = typeFilterLabel ? matchedCount : search.number;
+        const truncated = effectiveCount > shown.length;
+        const scope = typeFilterLabel ? `${typeFilterLabel} option(s)` : `rental option(s)`;
         const summary =
           search.number > 0
-            ? `Motion4Rent has ${search.number} rental option(s) in ${name} (${start_date} → ${end_date}). ` +
-              `Showing ${shown.length}${truncated ? ` of ${search.number} (refine to see more)` : ""}. Booking link: ${bookingLink}`
+            ? `Motion4Rent has ${effectiveCount} ${scope} in ${name} (${start_date} → ${end_date}). ` +
+              `Showing ${shown.length}${truncated ? ` of ${effectiveCount} (open the booking link for the rest)` : " (all of them)"}. Booking link: ${bookingLink}`
             : `Motion4Rent has no availability in ${name} for these dates. Link to review/other dates: ${bookingLink}`;
 
         return jsonResult(summary, {
@@ -249,20 +329,27 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           country: place.country,
           dates: { start: start_date, end: end_date },
           available: search.number > 0,
-          count: search.number,
+          count: effectiveCount,
+          total_all_types: search.number,
+          type_filter: typeFilterLabel,
           products: productsOut,
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
             "These rentals are offered by MOTION4RENT. 'total' is the FINAL price per product (already includes the " +
             "management fee and taxes) — quote it AS-IS. Do NOT add, estimate or mention any extra fee, and do NOT say " +
-            "'from'/'approx'. Present a COMPLETE, rich listing for each option (name, price, photo, and a short line of key " +
-            "info like cancellation) — do NOT be terse. Show the photo as a clickable markdown image ![name](image_url). " +
-            "Do NOT show internal ids (id_product_store/id_store) or the store name. For delivery/extras or the exact " +
-            "breakdown, call get_rental_details (its price.total matches this 'total'). ⚠️ Each product carries " +
+            "'from'/'approx'. Present a COMPLETE, RICH card for EACH option — mirror the website: the photo (clickable " +
+            "markdown image ![name](image_url)), the name/type, the key specs from 'attributes' (label: value, e.g. max " +
+            "weight, folding), 'rating'/'reviews' if present (e.g. ★4.6 · 7 reviews), the 'total' plus 'price_per_day'/'days', " +
+            "the 'delivery_options' block (label + price, marking free ones as Free — offer ONLY these), and " +
+            "'free_cancellation_until' (e.g. 'Free cancellation before <date>'). Do NOT be terse and do NOT collapse these to " +
+            "a bare price. Do NOT show internal ids (id_product_store/id_store) or the store name. For the exact breakdown/extras " +
+            "call get_rental_details (its price.total matches this 'total'). ⚠️ Each product carries " +
             "pickup_closed_service/delivery_closed_service (holiday surcharge, already reflected in 'total'): you MUST forward " +
             "these SAME values to get_rental_details and create_booking for that product, or the price/charge will be wrong " +
-            "on holidays. Payment via create_booking or the website.",
+            "on holidays. Payment via create_booking or the website. When 'type_filter' is set, 'products' already contains " +
+            "ALL items of that type (up to the cap) — list them all, do NOT show just a few. 'count' is the number of that " +
+            "type; 'total_all_types' is every type combined.",
           truncated,
         });
       } catch (e) {
