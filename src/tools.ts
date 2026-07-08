@@ -210,9 +210,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
-            "These rentals are offered by MOTION4RENT. The inline images above are the products (same order as 'products'). " +
-            "Do NOT show internal ids (id_product_store/id_store) to the user. For full detail (store+map, delivery, extras) " +
-            "call get_rental_details with these ids. Payment happens on the website or via create_booking.",
+            "These rentals are offered by MOTION4RENT. The inline images above ARE the products (same order as 'products'): " +
+            "ALWAYS present each product together with its photo, PROACTIVELY — do NOT ask the user whether to show photos, " +
+            "and use the photo to help distinguish similar models. Do NOT show internal ids (id_product_store/id_store) or the " +
+            "store name to the user. For full detail (map link, delivery, extras) call get_rental_details with these ids. " +
+            "Payment happens on the website or via create_booking.",
           truncated,
         };
         // Inline thumbnails (base64) perquè el client MOSTRI les fotos al llistat (no un placeholder de link
@@ -245,10 +247,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       title: "Rental product details (Motion4Rent)",
       description:
         "Returns the FULL detail of a MOTION4RENT product: price, deposit, photo (image_url + an inline image), the store " +
-        "(name + map link 'map_url'), ALL delivery types AVAILABLE for THIS product (with price), and the options/extras. " +
-        "IMPORTANT: present the store NAME and map_url to the user; NEVER show internal ids (id_store, id_product_store). " +
-        "Only offer the delivery_options returned here (the rest are not available for this item). Use the ids from " +
-        "search_mobility_rentals.",
+        "(a 'View location' map link 'map_url' only), ALL delivery types AVAILABLE for THIS product (with price), and the " +
+        "options/extras. IMPORTANT: present a 'View location' link (map_url); do NOT reveal the store name, and NEVER show " +
+        "internal ids (id_store, id_product_store). Only offer the delivery_options returned here (the rest are not " +
+        "available for this item). Use the ids from search_mobility_rentals.",
       inputSchema: {
         id_product_store: z.number().describe("id_product_store from the search result. [Seville test: 559]"),
         id_store: z.number().describe("id_store from the search result. [Seville test: 76]"),
@@ -322,7 +324,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             prepayment_percent: detail.prepayment_percent,
             discount_percent: detail.discount_percent,
           },
-          store: { name: detail.store_name, map_url: storeMapUrl(detail.store_place_id, detail.store_name) },
+          // NOMÉS enllaç de mapa (no exposem el nom del partner; el nom només s'usa per construir el link).
+          store: { map_url: storeMapUrl(detail.store_place_id, detail.store_name) },
           delivery_options: deliveryOptions,
           options: options.map((o) => ({
             id: o.id,
@@ -333,12 +336,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           cancellation: detail.cancellation,
           days: detail.days,
           note:
-            "Show the store NAME and map_url to the user; do NOT show internal ids. Offer only these delivery_options. " +
-            "The final total (with delivery/options/currency) is recomputed server-side at booking.",
+            "Do NOT reveal the store name to the user; show only a 'View location' link (map_url). Do NOT show internal " +
+            "ids either. Offer only these delivery_options. The final total (delivery/options/currency) is recomputed " +
+            "server-side at booking.",
         };
         const summary =
-          `Motion4Rent — "${detail.name ?? "product"}" at ${detail.store_name ?? "the store"} (prices in ${displayCurrency}). ` +
-          `${deliveryOptions.length} delivery option(s), ${out.options.length} extra(s).`;
+          `Motion4Rent — "${detail.name ?? "product"}" (prices in ${displayCurrency}). ` +
+          `${deliveryOptions.length} delivery option(s), ${out.options.length} extra(s). Show a 'View location' map link, not the store name.`;
         // Include an inline image so the client SHOWS the photo (a text URL isn't rendered).
         const img = await imageContentBlock(imageUrl);
         const content: any[] = [{ type: "text" as const, text: summary }];

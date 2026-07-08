@@ -266,11 +266,14 @@ export function productImageUrl(
   return `${b}/${clean}`;
 }
 
-/** Enllaç de Google Maps de la botiga (per place_id; fallback a cerca per nom). null si no hi ha res. */
+/**
+ * Enllaç de Google Maps de la botiga. Si hi ha place_id, s'usa una query NEUTRA (Google centra pel
+ * place_id igualment) per NO filtrar el nom del partner ni dins la URL. Sense place_id, cau a cerca per nom.
+ */
 export function storeMapUrl(placeId: string | null | undefined, name: string | null | undefined): string | null {
   const pid = (placeId ?? "").trim();
   if (pid !== "") {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name ?? "store")}&query_place_id=${encodeURIComponent(pid)}`;
+    return `https://www.google.com/maps/search/?api=1&query=location&query_place_id=${encodeURIComponent(pid)}`;
   }
   const n = (name ?? "").trim();
   return n !== "" ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(n)}` : null;
