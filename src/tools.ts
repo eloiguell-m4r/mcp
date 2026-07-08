@@ -199,7 +199,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               `Showing ${productos.length}${truncated ? " (truncated)" : ""}. Booking link: ${bookingLink}`
             : `Motion4Rent has no availability in ${name} for these dates. Link to review/other dates: ${bookingLink}`;
 
-        return jsonResult(summary, {
+        const data = {
           provider: "Motion4Rent",
           city: name,
           country: place.country,
@@ -210,11 +210,28 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
-            "These rentals are offered by MOTION4RENT. Show the photo (image_url) and the name; do NOT show internal " +
-            "ids (id_product_store/id_store) to the user. For full detail (store+map, delivery, extras) call " +
-            "get_rental_details with these ids. Payment happens on the website or via create_booking.",
+            "These rentals are offered by MOTION4RENT. The inline images above are the products (same order as 'products'). " +
+            "Do NOT show internal ids (id_product_store/id_store) to the user. For full detail (store+map, delivery, extras) " +
+            "call get_rental_details with these ids. Payment happens on the website or via create_booking.",
           truncated,
-        });
+        };
+        // Inline thumbnails (base64) perquè el client MOSTRI les fotos al llistat (no un placeholder de link
+        // extern). Limitat a IMG_CAP per no inflar el payload; cada imatge amb el nom+preu just abans.
+        const IMG_CAP = 6;
+        const imgGroups = await Promise.all(
+          productsOut.slice(0, IMG_CAP).map(async (p) => {
+            // Miniatura petita (w480) per al llistat; image_url del payload es queda a w800.
+            const thumb = productImageUrl(config.productImageBase, p.image, 480);
+            const b = await imageContentBlock(thumb);
+            return b
+              ? [{ type: "text" as const, text: `${p.name}${p.total != null ? ` — ${p.total} ${p.currency ?? ""}`.trimEnd() : ""}` }, b]
+              : [];
+          }),
+        );
+        const content: any[] = [{ type: "text" as const, text: summary }];
+        content.push(...imgGroups.flat());
+        content.push({ type: "text" as const, text: "```json\n" + JSON.stringify(data, null, 2) + "\n```" });
+        return { content };
       } catch (e) {
         return errResult(`Error searching availability: ${(e as Error).message}`);
       }
@@ -274,7 +291,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         const conv = (v: number | null) => (v == null ? null : Math.round(v * rate * 100) / 100);
 
         // Delivery types ACTUALLY available for this product (only the ones it supports).
-        const cityPrice = conv(detail.city_delivery_price) ?? 0;
+        // Virtual stores (id_virtual>0) deliver FREE (price 0), matching payAction/the web.
+        const cityPrice = detail.is_virtual ? 0 : conv(detail.city_delivery_price) ?? 0;
         const deliveryOptions: any[] = [{ delivery_type: 0, label: "Store pickup", price: 0, free: true }];
         if (detail.delivery_available) {
           deliveryOptions.push({ delivery_type: 1, label: "Home delivery", price: cityPrice, needs: ["delivery_address"] });

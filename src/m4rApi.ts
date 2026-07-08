@@ -234,6 +234,7 @@ export interface DetallProducto {
   city_delivery_price: number | null; // preu pla de lliurament a ciutat (details.delivery_price); 0/null = pickup gratis
   delivery_available: boolean; // details.delivery>0 → admet domicili/hotel
   cruise_available: boolean; // details.cruises>0 → admet lliurament a creuer
+  is_virtual: boolean; // botiga virtual (id_virtual>0): el lliurament és gratis (com payAction)
   airports: Array<{ place_id: string; name: string; price: number | null }>; // lliurament a aeroport (buit si no n'hi ha)
   store_name: string | null; // nom de la botiga (per presentar; MAI l'id intern)
   store_place_id: string | null; // per construir l'enllaç de mapa
@@ -246,12 +247,23 @@ export interface DetallProducto {
   };
 }
 
-/** URL pública (CDN) d'una imatge de producte a partir del filename de /details. null si buit. */
-export function productImageUrl(base: string, filename: string | null | undefined): string | null {
+/**
+ * URL pública (CDN) d'una imatge de producte a partir del filename de /details. null si buit.
+ * `width` opcional: si el base acaba en /wNNN, el substitueix (p. ex. 480 per a miniatures de llistat).
+ */
+export function productImageUrl(
+  base: string,
+  filename: string | null | undefined,
+  width?: number,
+): string | null {
   const f = (filename ?? "").trim();
   if (f === "") return null;
   const clean = f.replace(/^\/+/, "");
-  return `${base}/${clean}`;
+  let b = base;
+  if (width && /\/w\d+$/.test(b)) {
+    b = b.replace(/\/w\d+$/, `/w${width}`);
+  }
+  return `${b}/${clean}`;
 }
 
 /** Enllaç de Google Maps de la botiga (per place_id; fallback a cerca per nom). null si no hi ha res. */
@@ -295,6 +307,7 @@ export function normalizeDetails(raw: any): DetallProducto | null {
     city_delivery_price: num(p.delivery_price),
     delivery_available: (num(p.delivery) ?? 0) > 0,
     cruise_available: (num(p.cruises) ?? 0) > 0,
+    is_virtual: (num(d.id_virtual) ?? 0) > 0,
     store_name: (body?.store?.name ?? null) || null,
     store_place_id: (body?.store?.place_id ?? null) || null,
     airports:
