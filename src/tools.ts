@@ -39,25 +39,6 @@ function errResult(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
 
-/**
- * Descarrega una imatge i la retorna com a content block MCP (base64) perquè el client la MOSTRI
- * (una URL de text no es renderitza; un bloc image sí). null si falla, no és imatge o és massa gran.
- */
-async function imageContentBlock(url: string | null | undefined) {
-  if (!url) return null;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const mime = res.headers.get("content-type") ?? "image/jpeg";
-    if (!mime.startsWith("image/")) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > 900_000) return null; // evita payloads enormes al client
-    return { type: "image" as const, data: buf.toString("base64"), mimeType: mime };
-  } catch {
-    return null;
-  }
-}
-
 export function registerTools(server: McpServer, config: AppConfig): void {
   // 1) COBERTURA / desambiguació de ciutat.
   server.registerTool(
@@ -199,7 +180,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               `Showing ${productos.length}${truncated ? " (truncated)" : ""}. Booking link: ${bookingLink}`
             : `Motion4Rent has no availability in ${name} for these dates. Link to review/other dates: ${bookingLink}`;
 
-        const data = {
+        return jsonResult(summary, {
           provider: "Motion4Rent",
           city: name,
           country: place.country,
@@ -210,30 +191,12 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
-            "These rentals are offered by MOTION4RENT. The inline images above ARE the products (same order as 'products'): " +
-            "ALWAYS present each product together with its photo, PROACTIVELY — do NOT ask the user whether to show photos, " +
-            "and use the photo to help distinguish similar models. Do NOT show internal ids (id_product_store/id_store) or the " +
-            "store name to the user. For full detail (map link, delivery, extras) call get_rental_details with these ids. " +
-            "Payment happens on the website or via create_booking.",
+            "These rentals are offered by MOTION4RENT. Present each product with its photo as a clickable image using " +
+            "markdown ![name](image_url) so the user can view it (the client shows external images on one click). Do NOT " +
+            "show internal ids (id_product_store/id_store) or the store name. For full detail (map link, delivery, extras) " +
+            "call get_rental_details with these ids. Payment happens on the website or via create_booking.",
           truncated,
-        };
-        // Inline thumbnails (base64) perquè el client MOSTRI les fotos al llistat (no un placeholder de link
-        // extern). Limitat a IMG_CAP per no inflar el payload; cada imatge amb el nom+preu just abans.
-        const IMG_CAP = 6;
-        const imgGroups = await Promise.all(
-          productsOut.slice(0, IMG_CAP).map(async (p) => {
-            // Miniatura petita (w480) per al llistat; image_url del payload es queda a w800.
-            const thumb = productImageUrl(config.productImageBase, p.image, 480);
-            const b = await imageContentBlock(thumb);
-            return b
-              ? [{ type: "text" as const, text: `${p.name}${p.total != null ? ` — ${p.total} ${p.currency ?? ""}`.trimEnd() : ""}` }, b]
-              : [];
-          }),
-        );
-        const content: any[] = [{ type: "text" as const, text: summary }];
-        content.push(...imgGroups.flat());
-        content.push({ type: "text" as const, text: "```json\n" + JSON.stringify(data, null, 2) + "\n```" });
-        return { content };
+        });
       } catch (e) {
         return errResult(`Error searching availability: ${(e as Error).message}`);
       }
@@ -246,7 +209,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     {
       title: "Rental product details (Motion4Rent)",
       description:
-        "Returns the FULL detail of a MOTION4RENT product: price, deposit, photo (image_url + an inline image), the store " +
+        "Returns the FULL detail of a MOTION4RENT product: price, deposit, photo (image_url — present it as a clickable " +
+        "markdown image ![name](image_url)), the store " +
         "(a 'View location' map link 'map_url' only), ALL delivery types AVAILABLE for THIS product (with price), and the " +
         "options/extras. IMPORTANT: present a 'View location' link (map_url); do NOT reveal the store name, and NEVER show " +
         "internal ids (id_store, id_product_store). Only offer the delivery_options returned here (the rest are not " +
@@ -336,19 +300,16 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           cancellation: detail.cancellation,
           days: detail.days,
           note:
-            "Do NOT reveal the store name to the user; show only a 'View location' link (map_url). Do NOT show internal " +
-            "ids either. Offer only these delivery_options. The final total (delivery/options/currency) is recomputed " +
-            "server-side at booking.",
+            "When presenting the details, INCLUDE the product photo as a clickable markdown image ![name](image_url) " +
+            "(the client shows external images on one click). Do NOT reveal the store name; show only a 'View location' " +
+            "link (map_url). Do NOT show internal ids. Offer only these delivery_options. The final total " +
+            "(delivery/options/currency) is recomputed server-side at booking.",
         };
         const summary =
           `Motion4Rent — "${detail.name ?? "product"}" (prices in ${displayCurrency}). ` +
-          `${deliveryOptions.length} delivery option(s), ${out.options.length} extra(s). Show a 'View location' map link, not the store name.`;
-        // Include an inline image so the client SHOWS the photo (a text URL isn't rendered).
-        const img = await imageContentBlock(imageUrl);
-        const content: any[] = [{ type: "text" as const, text: summary }];
-        if (img) content.push(img);
-        content.push({ type: "text" as const, text: "```json\n" + JSON.stringify(out, null, 2) + "\n```" });
-        return { content };
+          `${deliveryOptions.length} delivery option(s), ${out.options.length} extra(s). ` +
+          `Include the photo (image_url) and a 'View location' map link; do not show the store name.`;
+        return jsonResult(summary, out);
       } catch (e) {
         return errResult(`Error getting details: ${(e as Error).message}`);
       }
