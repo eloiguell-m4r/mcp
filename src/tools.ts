@@ -25,6 +25,17 @@ import { findPolicies } from "./knowledge/policies.js";
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data en format YYYY-MM-DD");
 const MAX_PRODUCTS = 25;
 
+/** Normalitza una hora ("10:00", "1000", "10", "9:30") a HHMM de 4 dígits. undefined si no és vàlida. */
+function toApiTime(t?: string): string | undefined {
+  if (!t) return undefined;
+  const s = t.trim();
+  let m = s.match(/^(\d{1,2}):?(\d{2})$/);
+  if (m) return `${m[1].padStart(2, "0")}${m[2]}`;
+  m = s.match(/^(\d{1,2})$/);
+  if (m) return `${m[1].padStart(2, "0")}00`;
+  return undefined;
+}
+
 /** Empaqueta un objecte com a resultat de tool (text JSON + resum llegible). */
 function jsonResult(summary: string, data: unknown) {
   return {
@@ -99,9 +110,17 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           .string()
           .optional()
           .describe("Currency to display prices in (one from list_currencies, e.g. 'USD'). Optional; defaults to the product currency."),
+        pickup_time: z
+          .string()
+          .optional()
+          .describe("Pickup time HH:MM (e.g. '10:00'). ALWAYS ask the user; affects availability. Default 10:00 if unknown."),
+        return_time: z
+          .string()
+          .optional()
+          .describe("Return time HH:MM (e.g. '18:00'). ALWAYS ask the user; affects availability. Default 10:00 if unknown."),
       },
     },
-    async ({ city, start_date, end_date, product_type, country, language, currency }) => {
+    async ({ city, start_date, end_date, product_type, country, language, currency, pickup_time, return_time }) => {
       try {
         const lang = language ?? "en";
         const geo = await geocodeCity(config.apiBaseUrl, city);
@@ -128,6 +147,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           citySlug: place.url || slugCiudad(city),
           start: start_date,
           end: end_date,
+          sh: toApiTime(pickup_time),
+          eh: toApiTime(return_time),
           locale,
           type: 0,
           lat: place.lat,
@@ -226,9 +247,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           .string()
           .optional()
           .describe("Currency to display prices in (one from list_currencies, e.g. 'USD'). Optional; defaults to product currency. [test: USD]"),
+        pickup_time: z.string().optional().describe("Pickup time HH:MM. ALWAYS ask the user; affects availability/price. [test: 23:00]"),
+        return_time: z.string().optional().describe("Return time HH:MM. ALWAYS ask the user. [test: 23:00]"),
       },
     },
-    async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency }) => {
+    async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency, pickup_time, return_time }) => {
       try {
         const [detail, options] = await Promise.all([
           getDetails(config.apiBaseUrl, {
@@ -237,6 +260,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             idVirtual: id_virtual,
             start: start_date,
             end: end_date,
+            sh: toApiTime(pickup_time),
+            eh: toApiTime(return_time),
             locale: apiLocale(language ?? "en"),
           }),
           getProductOptions(config.apiBaseUrl, id_product_store).catch(() => []),
@@ -427,8 +452,9 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           "the user; say the booking is confirmed upon payment. Default STORE PICKUP; optionally CITY delivery " +
           "(delivery_type 1 home / 2 hotel / 3 cruise, with delivery_address) or AIRPORT (5, with airport_place_id + " +
           "flight_number). Offer ONLY the delivery types get_rental_details reports as available. Add options/extras with " +
-          "'options_id' (from list_product_options). The server prices product, options and delivery. Before calling it, " +
-          "ASK for the user's consent and data (first/last name, email, phone with prefix, country), e.g.: «Shall I " +
+          "'options_id' (from list_product_options). The server prices product, options and delivery. ALWAYS ask the user " +
+          "for the PICKUP time and RETURN time (pickup_time/return_time, HH:MM) — never assume them. Before calling it, " +
+          "ASK for the user's consent and data (first/last name, email, phone with prefix, country, pickup & return times), e.g.: «Shall I " +
           "prepare the booking and generate the payment link? The booking is confirmed once you pay.» Use the ids from " +
           "search_mobility_rentals. The server recomputes the price (do NOT send it). The user may pay a DEPOSIT now and " +
           "the rest at pickup: tell them the breakdown (pay_now / pay_at_pickup). Some bookings stay pending store " +
@@ -442,6 +468,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           id_virtual: z.number().describe("id_virtual from the search result (0 if physical store). [test: 0]"),
           start_date: DATE.describe("Start date (YYYY-MM-DD). [test: 2026-07-24]"),
           end_date: DATE.describe("End date (YYYY-MM-DD). [test: 2026-07-24]"),
+          pickup_time: z.string().optional().describe("Pickup time HH:MM. You MUST ask the user before booking. [test: 23:00]"),
+          return_time: z.string().optional().describe("Return time HH:MM. You MUST ask the user before booking. [test: 23:00]"),
           customer: z
             .object({
               first_name: z.string().describe("First name. [test: Test]"),
@@ -485,7 +513,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           comments: z.string().optional().describe("Comments for the store. Optional."),
         },
       },
-      async ({ id_product_store, id_store, id_virtual, start_date, end_date, customer, language, currency, options_id, delivery_type, delivery_address, hotel_name, airport_place_id, flight_number, newsletter, comments }) => {
+      async ({ id_product_store, id_store, id_virtual, start_date, end_date, pickup_time, return_time, customer, language, currency, options_id, delivery_type, delivery_address, hotel_name, airport_place_id, flight_number, newsletter, comments }) => {
         try {
           const r = await createBooking(config.checkoutBaseUrl, config.checkoutSecret, {
             idProductStore: id_product_store,
@@ -493,6 +521,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             idVirtual: id_virtual,
             start: start_date,
             end: end_date,
+            sh: toApiTime(pickup_time),
+            eh: toApiTime(return_time),
             locale: apiLocale(language ?? "en"),
             customer: {
               firstName: customer.first_name,
