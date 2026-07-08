@@ -171,45 +171,70 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           types: product_type ? [product_type] : [],
         });
 
-        const productos = search.productos.slice(0, MAX_PRODUCTS);
-
-        // Preu FINAL del llistat = base + fee de gestió (managementFeeEur + store.extra_fee), en moneda del producte.
-        // La cerca NO inclou el fee de gestió; el sumem perquè el llistat mostri el MATEIX preu que el detall/booking
-        // (verificat: search_base + 9 = details.total). Així l'assistent no ha d'estimar res.
-        for (const p of productos) {
-          if (p.total != null) {
-            p.total = Math.round((p.total + config.managementFeeEur + (p.store_extra_fee ?? 0)) * 100) / 100;
-          }
-        }
-
-        // Conversió de moneda (després de sumar el fee, com el web abans de convertir).
+        // Enriquim cada producte mostrat amb /details (MODEL + preu EXACTE = details.total = booking = web).
+        // El model i el preu-amb-fee NO són al resultat de cerca; per això cal /details per producte (limitat).
+        const SEARCH_ENRICH_CAP = 10;
+        const shown = search.productos.slice(0, SEARCH_ENRICH_CAP);
         const target = (currency ?? "").trim().toUpperCase();
-        if (target) {
-          const rateCache = new Map<string, number>();
-          for (const p of productos) {
-            const src = (p.currency ?? "EUR").toUpperCase();
-            if (p.total != null && src !== target) {
-              let rate = rateCache.get(src);
-              if (rate === undefined) {
-                rate = await getExchangeRate(config.apiBaseUrl, src, target);
-                rateCache.set(src, rate);
-              }
-              p.total = Math.round(p.total * rate * 100) / 100;
-            }
-            p.currency = target;
+        const rateCache = new Map<string, number>();
+        const rateFor = async (src: string): Promise<number> => {
+          const s = src.toUpperCase();
+          if (!target || s === target) return 1;
+          let r = rateCache.get(s);
+          if (r === undefined) {
+            r = await getExchangeRate(config.apiBaseUrl, s, target);
+            rateCache.set(s, r);
           }
-        }
+          return r;
+        };
 
-        const truncated = search.productos.length > MAX_PRODUCTS;
-        // 'total' ja és el preu FINAL (amb fee de gestió). Amaguem el camp intern store_extra_fee.
-        const productsOut = productos.map(({ store_extra_fee, ...p }) => ({
-          ...p,
-          image_url: productImageUrl(config.productImageBase, p.image),
-        }));
+        const productsOut = await Promise.all(
+          shown.map(async (p) => {
+            let detail: Awaited<ReturnType<typeof getDetails>> = null;
+            try {
+              detail = await getDetails(config.apiBaseUrl, {
+                idProductStore: p.id_product_store ?? 0,
+                idStore: p.id_store ?? 0,
+                idVirtual: p.id_virtual ?? 0,
+                start: start_date,
+                end: end_date,
+                sh: toApiTime(pickup_time),
+                eh: toApiTime(return_time),
+                locale,
+              });
+            } catch {
+              /* fallback sota */
+            }
+            const src = (detail?.currency ?? p.currency ?? "EUR").toUpperCase();
+            const rate = await rateFor(src);
+            // Preu EXACTE de /details (amb fee de gestió). Fallback: base de cerca + fee de gestió.
+            const exact =
+              detail?.price_total != null
+                ? detail.price_total
+                : p.total != null
+                  ? p.total + config.managementFeeEur + (p.store_extra_fee ?? 0)
+                  : null;
+            const model = detail ? [detail.brand, detail.model].filter(Boolean).join(" ").trim() : "";
+            return {
+              id_product_store: p.id_product_store,
+              id_store: p.id_store,
+              id_virtual: p.id_virtual,
+              name: model || detail?.name || p.name, // MODEL si n'hi ha (el 'name' sol ser el tipus genèric)
+              type: detail?.type ?? null,
+              total: exact != null ? Math.round(exact * rate * 100) / 100 : null,
+              currency: target || src,
+              image_url: productImageUrl(config.productImageBase, p.image),
+              cancellation_refundable: p.cancellation_refundable,
+              cancellation_days: p.cancellation_days,
+            };
+          }),
+        );
+
+        const truncated = search.number > shown.length;
         const summary =
           search.number > 0
             ? `Motion4Rent has ${search.number} rental option(s) in ${name} (${start_date} → ${end_date}). ` +
-              `Showing ${productos.length}${truncated ? " (truncated)" : ""}. Booking link: ${bookingLink}`
+              `Showing ${shown.length}${truncated ? ` of ${search.number} (refine to see more)` : ""}. Booking link: ${bookingLink}`
             : `Motion4Rent has no availability in ${name} for these dates. Link to review/other dates: ${bookingLink}`;
 
         return jsonResult(summary, {
@@ -315,9 +340,16 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         }
 
         const imageUrl = productImageUrl(config.productImageBase, detail.image);
+        const modelName = [detail.brand, detail.model].filter(Boolean).join(" ").trim();
         const out = {
           provider: "Motion4Rent",
-          product: { name: detail.name, type: detail.type, image_url: imageUrl },
+          product: {
+            // Nom amb MODEL quan hi és (el 'name' sol ser el tipus genèric). type = categoria.
+            name: modelName || detail.name,
+            model: modelName || null,
+            type: detail.type,
+            image_url: imageUrl,
+          },
           price: {
             currency: displayCurrency,
             total: conv(detail.price_total),
