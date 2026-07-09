@@ -4,14 +4,19 @@ Com hem afegit el servidor MCP de producció (`https://mcp.motion4rent.com/mcp`)
 Claude Desktop al Mac.
 
 ## Per què no per la UI de "Connectors"
-La UI de connectors de Claude Desktop / claude.ai web només accepta servidors remots
-amb **OAuth**, no un **bearer token estàtic**. El nostre MCP es protegeix amb un bearer
-(`MCP_AUTH_TOKEN`), així que no es pot afegir per la via gràfica.
+La UI de connectors de Claude Desktop / claude.ai web espera servidors remots amb **OAuth**
+(descoberta `.well-known` + flux d'autorització). El nostre MCP encara **no** té OAuth
+(vegeu `docs/oauth-implementation-plan.md`), així que de moment seguim afegint-lo amb
+**`mcp-remote`** com a pont: un procés local (stdio ↔ HTTP) que Claude Desktop arrenca i que
+reenvia el JSON-RPC al nostre `/mcp` per HTTPS. Així Claude Desktop parla amb el servidor com
+si fos un MCP local.
 
-Solució: fem servir **`mcp-remote`** com a pont. És un procés local (stdio ↔ HTTP) que
-Claude Desktop arrenca; ell reenvia el JSON-RPC al nostre `/mcp` per HTTPS **injectant la
-capçalera `Authorization: Bearer …`**. Així Claude Desktop parla amb el servidor amb bearer
-com si fos un MCP local.
+> ℹ️ **Canvi recent:** ara l'endpoint `/mcp` és **públic** (rate-limited), no protegit per bearer
+> obligatori. Per tant el `--header Authorization: Bearer …` del JSON **ja no és imprescindible**
+> perquè funcioni — però **el mantenim** perquè el bearer actua de **bypass del rate-limit**
+> (si no, Claude Desktop podria quedar limitat en ús intensiu). El JSON de sota **no canvia**.
+> Quan implementem OAuth (opció B), aleshores sí que es podrà afegir directament per la UI de
+> Connectors, sense `mcp-remote` ni bearer.
 
 ## Fitxer de configuració
 `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -40,6 +45,10 @@ Afegeix (o fusiona) dins de `mcpServers`:
 
 Substitueix `<MCP_AUTH_TOKEN>` pel bearer real (el mateix valor de `MCP_AUTH_TOKEN`
 del `.env` del servidor MCP). ⚠️ És un secret: no el pugis al repo.
+
+Amb l'endpoint públic, el bearer és **opcional però recomanat**: sense ell el connector també
+funciona (fins que topi amb el rate-limit); amb ell, salta el límit. Si el servidor s'executés en
+mode privat (`MCP_REQUIRE_AUTH=true`), aleshores el bearer sí que seria **obligatori**.
 
 ## Detalls que importen (i per què)
 - **`command` amb ruta absoluta `/opt/homebrew/bin/npx`**: Claude Desktop NO hereta el
