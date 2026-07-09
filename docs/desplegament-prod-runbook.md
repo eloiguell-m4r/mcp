@@ -82,7 +82,16 @@ MCP_AUTH_TOKEN=<GENERAR: openssl rand -hex 32>
 M4R_CHECKOUT_BASE_URL=http://127.0.0.1:8090   # vhost nginx intern loopback → app motion4rent, bypassa Cloudflare
 M4R_CHECKOUT_SECRET=cf30f91782f6c56f3ce44c6253f4541edbac24a37c85b6c070946f6473390771
 ```
-> `MCP_AUTH_TOKEN` és el bearer que posaràs també al connector de Claude/ChatGPT. Genera'l i guarda'l.
+> **Model d'auth (nou):** l'endpoint `/mcp` és **públic + rate-limited** per defecte (per poder anar
+> al directori, on el bearer estàtic no val). Variables:
+> - `MCP_AUTH_TOKEN` — bearer INTERN de confiança: un request amb aquest bearer **salta el rate-limit**
+>   (el fem servir a Claude Desktop via `mcp-remote`, i per a proves internes). Ja NO és una porta obligatòria.
+> - `MCP_REQUIRE_AUTH=true` — opcional: torna a EXIGIR el bearer (mode privat, 401 sense token). Útil si
+>   vols mantenir prod tancat fins que el connector estigui llest per publicar. Default `false` (públic).
+> - `RATE_LIMIT_MAX` (default 30) i `RATE_LIMIT_WINDOW_MS` (default 60000) — límit per IP (via `CF-Connecting-IP`).
+>
+> ⚠️ En desplegar aquest canvi, prod passa de "bearer obligatori" a **públic + rate-limit** (llevat que posis
+> `MCP_REQUIRE_AUTH=true`). Claude Desktop segueix funcionant (el bearer actua de bypass).
 >
 > ⚠️ **CLOUDFLARE — no apuntis `M4R_CHECKOUT_BASE_URL` a `https://www.motion4rent.com`.** El web públic està darrere un *managed challenge* de Cloudflare que retorna un repte JS "Just a moment…" (HTTP 403) a qualsevol client no-navegador. El MCP és servidor-a-servidor → quedaria bloquejat i `create_booking` fallaria (comprovat: `POST https://www.motion4rent.com/ai/checkout` torna el challenge de CF, no el 401 de l'app). Solució: cridar el **web local de Virgínia** (bypassa Cloudflare, com la resta de crides internes web→API). `WEB_BASE_URL` sí que pot ser la pública (només construeix deep-links que obre l'usuari al navegador).
 
@@ -154,7 +163,9 @@ Nota: si estan en pla **free amb Bot Fight Mode** (no Super), no es pot acotar p
 **Verificació** (des de fora): `curl -s https://mcp.motion4rent.com/health` → ha de tornar `{"ok":true,...}` en JSON, no l'HTML del challenge.
 
 ## 7) Registrar el connector
-- Claude: Settings → Connectors → afegir `https://mcp.motion4rent.com/mcp` amb bearer = `MCP_AUTH_TOKEN`.
+- **Claude Desktop (mètode real, bearer):** la UI de Connectors només accepta OAuth, no
+  bearer estàtic → cal el pont `mcp-remote` a `claude_desktop_config.json`. Passos exactes:
+  **`docs/connector-claude-desktop.md`**.
 - ChatGPT: afegir com a app/connector amb la mateixa URL + token.
 
 ## 8) Després (fase següent)

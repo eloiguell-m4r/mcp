@@ -28,12 +28,41 @@ async function runStdio(): Promise<void> {
   console.error(`[motion4rent-mcp] stdio actiu. API=${config.apiBaseUrl}`);
 }
 
-function authorized(req: Request): boolean {
-  if (!config.authToken) return true; // sense token configurat → obert
-  const h = req.header("authorization") ?? "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
+/** Bearer INTERN de confiança (salta el rate-limit). No és l'auth del directori. */
+function hasTrustedBearer(req: Request): boolean {
+  if (!config.authToken) return false;
+  const m = (req.header("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
   return m ? m[1].trim() === config.authToken : false;
 }
+
+/** IP real del client darrere Cloudflare/nginx (mai req.ip, que seria el proxy). */
+function clientIp(req: Request): string {
+  const cf = req.header("cf-connecting-ip");
+  if (cf) return cf.trim();
+  const xff = req.header("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+// Rate-limit en memòria, finestra fixa per IP (procés únic → n'hi ha prou; sense dependències).
+const rlHits = new Map<string, { count: number; resetAt: number }>();
+function rateLimit(ip: string, now: number): { ok: boolean; retryAfterSec: number } {
+  const e = rlHits.get(ip);
+  if (!e || now >= e.resetAt) {
+    rlHits.set(ip, { count: 1, resetAt: now + config.rateLimitWindowMs });
+    return { ok: true, retryAfterSec: 0 };
+  }
+  e.count += 1;
+  if (e.count > config.rateLimitMax) {
+    return { ok: false, retryAfterSec: Math.ceil((e.resetAt - now) / 1000) };
+  }
+  return { ok: true, retryAfterSec: 0 };
+}
+// Neteja periòdica d'entrades caducades perquè el Map no creixi sense límit.
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, e] of rlHits) if (now >= e.resetAt) rlHits.delete(ip);
+}, 60_000).unref();
 
 async function runHttp(): Promise<void> {
   const app = express();
@@ -43,9 +72,19 @@ async function runHttp(): Promise<void> {
 
   // Endpoint MCP (Streamable HTTP), stateless: servidor+transport nous per petició.
   app.post("/mcp", async (req: Request, res: Response) => {
-    if (!authorized(req)) {
-      res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null });
-      return;
+    // El bearer intern de confiança salta el control. Sense ell: mode privat → 401;
+    // mode públic (directori) → rate-limit per IP.
+    if (!hasTrustedBearer(req)) {
+      if (config.requireAuth) {
+        res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null });
+        return;
+      }
+      const { ok, retryAfterSec } = rateLimit(clientIp(req), Date.now());
+      if (!ok) {
+        res.set("Retry-After", String(retryAfterSec));
+        res.status(429).json({ jsonrpc: "2.0", error: { code: -32029, message: "Too many requests" }, id: null });
+        return;
+      }
     }
     const server = buildServer();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -71,7 +110,8 @@ async function runHttp(): Promise<void> {
   app.delete("/mcp", methodNotAllowed);
 
   app.listen(config.port, () => {
-    console.error(`[motion4rent-mcp] HTTP actiu a :${config.port}/mcp  API=${config.apiBaseUrl}  auth=${config.authToken ? "on" : "off"}`);
+    const mode = config.requireAuth ? "privat (bearer obligatori)" : `públic (rate-limit ${config.rateLimitMax}/${Math.round(config.rateLimitWindowMs / 1000)}s)`;
+    console.error(`[motion4rent-mcp] HTTP actiu a :${config.port}/mcp  API=${config.apiBaseUrl}  mode=${mode}  bearer-intern=${config.authToken ? "on" : "off"}`);
   });
 }
 

@@ -14,8 +14,21 @@ function env(name: string, fallback?: string): string {
 export const config = {
   transport: (process.env.MCP_TRANSPORT ?? "http").trim().toLowerCase() as "http" | "stdio",
   port: Number(process.env.PORT ?? 8787),
-  /** Token bearer opcional per a l'endpoint HTTP. Buit = sense auth. */
+  /**
+   * Token bearer opcional. NO és l'auth del directori (que és OAuth/none): serveix com a
+   * credencial INTERNA de confiança — un request amb aquest bearer salta el rate-limit.
+   * Buit = no hi ha bypass intern.
+   */
   authToken: (process.env.MCP_AUTH_TOKEN ?? "").trim(),
+  /**
+   * Si true, l'endpoint /mcp EXIGEIX el bearer (desplegament privat/intern → 401 sense token).
+   * Per al directori de Claude/ChatGPT ha de ser FALSE (connector públic): el flux d'alta no
+   * deixa enganxar un bearer estàtic. Default false = públic + rate-limit.
+   */
+  requireAuth: (process.env.MCP_REQUIRE_AUTH ?? "").trim().toLowerCase() === "true",
+  /** Rate-limit del /mcp públic (per IP): finestra i màxim de peticions. El bearer intern el salta. */
+  rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000) || 60_000,
+  rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 30) || 30,
   /** Base de l'API de motion4rent (endpoints públics /search, /ai/cities, /details). */
   apiBaseUrl: env("M4R_API_BASE_URL", "http://localhost:3000").replace(/\/+$/, ""),
   /** Base de la web pública per als deep-links. */
