@@ -39,6 +39,28 @@ function unwrapBody(raw: unknown): any {
   return raw;
 }
 
+// Cache en memòria amb TTL per a dades ESTÀTIQUES de catàleg (model/specs, extres, geocoding, monedes).
+// ⚠️ NO s'hi cacheja /details ni els tipus de canvi: preu/disponibilitat depenen de dates → sempre fresc.
+// Guarda la Promise → dedupe de crides concurrents idèntiques; si falla, s'esborra i es reintenta.
+const _cache = new Map<string, { at: number; p: Promise<any> }>();
+export const CATALOG_TTL_MS = 10 * 60_000; // 10 min: catàleg (model/specs/extres) canvia rarament
+function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = _cache.get(key);
+  if (hit && now - hit.at < ttlMs) return hit.p as Promise<T>;
+  const p = fn().catch((e) => {
+    _cache.delete(key);
+    throw e;
+  });
+  _cache.set(key, { at: now, p });
+  return p;
+}
+// Neteja periòdica perquè el Map no creixi sense límit.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, e] of _cache) if (now - e.at > 30 * 60_000) _cache.delete(k);
+}, 5 * 60_000).unref();
+
 /** Normalitza un idioma a un locale que accepta l'API (/search). */
 export function apiLocale(language: string): string {
   const l = (language ?? "en").trim().toLowerCase().slice(0, 2);
@@ -63,6 +85,8 @@ export interface GeocodeResult {
 
 export async function geocodeCity(apiBase: string, city: string): Promise<GeocodeResult> {
   const slug = slugCiudad(city);
+  // Coordenades de ciutat = estàtiques → cachejat (TTL llarg).
+  return memo(`geo:${apiBase}:${slug}`, 30 * 60_000, async () => {
   const raw = await getJson(`${apiBase}/ai/cities/${encodeURIComponent(slug)}`, DEFAULT_TIMEOUT_MS);
   const body = unwrapBody(raw);
   const places: GeoPlace[] = Array.isArray(body?.places)
@@ -81,6 +105,7 @@ export async function geocodeCity(apiBase: string, city: string): Promise<Geocod
     countries: Number(body?.countries ?? new Set(places.map((p) => p.country)).size),
     places,
   };
+  });
 }
 
 export interface Producto {
@@ -178,10 +203,13 @@ export async function searchResults(apiBase: string, a: SearchArgs): Promise<Sea
 
 /** Monedes actives de la plataforma (de /exchange/rates-to-eur). EUR sempre primer. */
 export async function getActiveCurrencies(apiBase: string): Promise<string[]> {
-  const body = unwrapBody(await getJson(`${apiBase}/exchange/rates-to-eur`, DEFAULT_TIMEOUT_MS));
-  const map = body && typeof body === "object" && body.data && typeof body.data === "object" ? body.data : {};
-  const codes = Object.keys(map).map((c) => c.toUpperCase());
-  return ["EUR", ...codes.filter((c) => c !== "EUR").sort()];
+  // Llista de monedes = gairebé estàtica → cachejat (TTL llarg). NO cachegem els rates (getExchangeRate).
+  return memo(`cur:${apiBase}`, 30 * 60_000, async () => {
+    const body = unwrapBody(await getJson(`${apiBase}/exchange/rates-to-eur`, DEFAULT_TIMEOUT_MS));
+    const map = body && typeof body === "object" && body.data && typeof body.data === "object" ? body.data : {};
+    const codes = Object.keys(map).map((c) => c.toUpperCase());
+    return ["EUR", ...codes.filter((c) => c !== "EUR").sort()];
+  });
 }
 
 /** Rate de conversió from→to (mateix 'rate' que el web a exchange()). 1 si from==to o error. */
@@ -214,14 +242,18 @@ export interface ProductOption {
 }
 
 export async function getProductOptions(apiBase: string, idProductStore: number): Promise<ProductOption[]> {
-  const body = unwrapBody(await getJson(`${apiBase}/details/options/${idProductStore}`, DEFAULT_TIMEOUT_MS));
-  const rows: any[] = Array.isArray(body?.response) ? body.response : [];
-  return rows.map((r) => ({
-    id: Number(r.id),
-    name: String(r.name ?? "Opció"),
-    price: Number(r.price ?? 0),
-    type: Number(r.type ?? 0),
-  }));
+  const url = `${apiBase}/details/options/${idProductStore}`;
+  // Extres = catàleg estàtic → cachejat.
+  return memo(`opts:${url}`, CATALOG_TTL_MS, async () => {
+    const body = unwrapBody(await getJson(url, DEFAULT_TIMEOUT_MS));
+    const rows: any[] = Array.isArray(body?.response) ? body.response : [];
+    return rows.map((r) => ({
+      id: Number(r.id),
+      name: String(r.name ?? "Opció"),
+      price: Number(r.price ?? 0),
+      type: Number(r.type ?? 0),
+    }));
+  });
 }
 
 export interface DetailsArgs {
@@ -596,6 +628,8 @@ export async function getProductLoad(apiBase: string, a: ProductLoadArgs): Promi
   const sameCity = a.sameCity ?? 1;
   const idVirtualReal = a.idVirtualReal ?? 0;
   const url = `${apiBase}/products/load/${a.idProductStore}/${a.idVirtual}/${radius}/${a.typeAtt}/${sameCity}/${idVirtualReal}`;
+  // Catàleg estàtic → cachejat (clau = URL, que ja inclou tots els params).
+  return memo(`load:${url}`, CATALOG_TTL_MS, async () => {
   const body = unwrapBody(await getJson(url, SEARCH_TIMEOUT_MS));
   const row = Array.isArray(body?.data) ? body.data[0] : null;
   if (!row || typeof row !== "object") return null;
@@ -634,4 +668,5 @@ export async function getProductLoad(apiBase: string, a: ProductLoadArgs): Promi
     .slice(0, 12)
     .map(([, v]) => v);
   return { brand, model, title, subtype, image, attributes };
+  });
 }

@@ -252,7 +252,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           shown.map(async (p) => {
             // /details → preu/lliurament/pickup/cancel·lació (amb fees). products/load → MODEL + specs reals.
             // (el model i les specs "de veritat" NO són a /details; viuen a products/load, com al web).
-            const [detail, load] = await Promise.all([
+            const [detail, load, opts] = await Promise.all([
               getDetails(config.apiBaseUrl, {
                 idProductStore: p.id_product_store ?? 0,
                 idStore: p.id_store ?? 0,
@@ -274,6 +274,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
                 sameCity: p.same_city ?? 1,
                 idVirtualReal: p.id_virtual_real ?? 0,
               }).catch(() => null),
+              // Extres/add-ons: perquè el llistat ja informi que n'hi ha (abans no ho deia fins a demanar-ho).
+              getProductOptions(config.apiBaseUrl, p.id_product_store ?? 0).catch(() => []),
             ]);
             const src = (detail?.currency ?? p.currency ?? "EUR").toUpperCase();
             const rate = await rateFor(src);
@@ -319,6 +321,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               currency: target || src,
               image_url: productImageUrl(config.productImageBase, load?.image || p.image),
               delivery_options, // ofereix NOMÉS aquestes (les altres no estan disponibles per aquest article)
+              // Extres/add-ons opcionals (buit = cap). Informa'n al llistat; s'afegeixen al preu si es trien.
+              extras: (opts ?? []).map((o) => ({
+                id: o.id,
+                name: o.name,
+                price: conv(o.price),
+                price_basis: o.type === 1 ? "flat" : "per_day",
+              })),
               free_cancellation_until: freeCancellationUntil(start_date, p.cancellation_days, p.cancellation_refundable),
               cancellation_refundable: p.cancellation_refundable,
               cancellation_days: p.cancellation_days,
@@ -358,7 +367,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             "markdown image ![name](image_url)), the 'category' as a small heading ABOVE the name (e.g. 'Electric " +
             "wheelchair · Standard'), the full 'name' (model), the key specs from 'attributes' (label: value, e.g. max " +
             "weight, folding), 'rating'/'reviews' if present (e.g. ★4.6 · 7 reviews), the 'total' plus 'price_per_day'/'days', " +
-            "the 'delivery_options' block (label + price, marking free ones as Free — offer ONLY these), and " +
+            "the 'delivery_options' block (label + price, marking free ones as Free — offer ONLY these), any optional " +
+            "'extras' (add-ons: name + price + per_day/flat — mention when the list is non-empty so the user knows they exist), and " +
             "'free_cancellation_until' (e.g. 'Free cancellation before <date>'). Do NOT be terse and do NOT collapse these to " +
             "a bare price. Do NOT show internal ids (id_product_store/id_store) or the store name. For the exact breakdown/extras " +
             "call get_rental_details (its price.total matches this 'total'). ⚠️ Each product carries " +
@@ -508,8 +518,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           days: detail.days,
           note:
             "price.total is the EXACT amount charged (base + management fee + taxes; matches the search 'total'). Quote it " +
-            "as-is; do NOT add or estimate extra fees. Delivery/options are added on top and any discount applied " +
-            "server-side at booking. Present the product 'name' (the real model) and its 'attributes' (specs: max weight, " +
+            "as-is; do NOT add or estimate extra fees. Delivery and any 'options' (optional add-ons/extras) are added on top " +
+            "and any discount applied server-side at booking. If 'options' is non-empty, ALWAYS list the available extras " +
+            "(name + price + per_day/flat) so the user knows they can add them. Present the product 'name' (the real model), " +
+            "the 'category' as a small heading above it, and its 'attributes' (specs: max weight, " +
             "range, folding, type…). When presenting the details, INCLUDE the product photo as a clickable markdown image " +
             "![name](image_url). Do NOT reveal the store name; show only a 'View location' link (map_url). Do NOT show " +
             "internal ids. Offer only these delivery_options.",
