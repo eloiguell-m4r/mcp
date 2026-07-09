@@ -86,6 +86,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     "check_city_coverage",
     {
       title: "Check city coverage (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: true },
       description:
         "Check whether Motion4Rent operates in a city and disambiguate homonyms (same city name in several countries). " +
         "Use before searching if the country is ambiguous.",
@@ -118,6 +119,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     "search_mobility_rentals",
     {
       title: "Search mobility rentals (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: true },
       description:
         "Search available Motion4Rent mobility equipment (wheelchairs, scooters, etc.) in a city and date range, " +
         "with the FINAL total price per product ('total', already includes the management fee and taxes — quote it as-is, " +
@@ -375,6 +377,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     "get_rental_details",
     {
       title: "Rental product details (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: true },
       description:
         "Returns the FULL detail of a MOTION4RENT product: price, deposit, photo (image_url — present it as a clickable " +
         "markdown image ![name](image_url)), the store " +
@@ -523,6 +526,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     "list_product_options",
     {
       title: "Product options/extras (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: true },
       description:
         "Returns the optional extras that can be added to a product's booking (e.g. leg rest, basket). Each option has " +
         "an 'id' (passed to create_booking inside 'options_id'), name, price and basis ('flat' or 'per_day'). Price is " +
@@ -560,6 +564,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     "list_currencies",
     {
       title: "Available currencies (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: true },
       description:
         "Returns the currencies the user can view prices and pay in (dynamic platform list). Use it to ASK the user " +
         "which currency they want for prices and booking, and pass the chosen one as 'currency' to " +
@@ -584,6 +589,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     "mobility_policies",
     {
       title: "Policies & FAQ (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: false },
       description:
         "Answers general service questions: cancellation, deposit, delivery process and cost, coverage, foldability, " +
         "weight/capacity, public transport/flights, insurance, returns and cities. The official texts are in SPANISH " +
@@ -623,6 +629,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       "create_booking",
       {
         title: "Create booking with payment link (Motion4Rent)",
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
         description:
           "Prepares the booking and returns a Stripe PAYMENT LINK (urlTpv) the user opens to pay. The booking is " +
           "FORMALIZED when the user pays (until then only the link exists). Do NOT use internal terms like 'hold' with " +

@@ -72,7 +72,8 @@ Portal: **`https://claude.ai/admin-settings/directory/submissions/new`**
 ## Resum del que ens falta abans d'enviar
 1. ✅ **Auth (A) públic + rate-limiting** implementat (`server.ts`): `/mcp` públic per defecte,
    bearer com a bypass intern, rate-limit per IP. (Falta desplegar-ho a prod.)
-2. Afegir **anotacions** `readOnlyHint`/`destructiveHint` a totes les tools.
+2. ✅ **Anotacions** afegides a totes les tools (`tools.ts`): lectura → `readOnlyHint: true`;
+   `create_booking` → `readOnlyHint: false, destructiveHint: false, idempotentHint: false`. (Falta desplegar.)
 3. ✅ **Política de privadesa**: afegida la secció "Booking through our AI assistant (Claude)"
    a `privacy.phtml` en tots els idiomes del web. (Falta desplegar el web.)
 4. Preparar **compte + guió de prova** per als revisors (truc de Sevilla).
