@@ -305,8 +305,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               id_product_store: p.id_product_store,
               id_store: p.id_store,
               id_virtual: p.id_virtual,
-              name: model || detail?.name || p.name, // MODEL (brand+model) si n'hi ha; si no, el tipus genèric
-              type: detail?.type ?? p.name, // categoria (p. ex. "Electric wheelchair"), útil com a subtítol
+              name: model || detail?.name || p.name, // MODEL complet si n'hi ha; si no, el tipus genèric
+              type: detail?.type ?? p.name, // tipus de producte (p. ex. "Electric wheelchair")
+              // Categoria com el web ("Electric wheelchair · Standard"): tipus + subtipus (atribut "type").
+              category: [detail?.type ?? p.name, load?.subtype].filter(Boolean).join(" · ") || null,
               // Specs riques de products/load (pes màx, autonomia, plegable, tipus…) com els badges del web.
               attributes: (load?.attributes?.length ? load.attributes : detail?.attributes) ?? [],
               rating: detail?.rating ?? null,
@@ -353,7 +355,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             "These rentals are offered by MOTION4RENT. 'total' is the FINAL price per product (already includes the " +
             "management fee and taxes) — quote it AS-IS. Do NOT add, estimate or mention any extra fee, and do NOT say " +
             "'from'/'approx'. Present a COMPLETE, RICH card for EACH option — mirror the website: the photo (clickable " +
-            "markdown image ![name](image_url)), the name/type, the key specs from 'attributes' (label: value, e.g. max " +
+            "markdown image ![name](image_url)), the 'category' as a small heading ABOVE the name (e.g. 'Electric " +
+            "wheelchair · Standard'), the full 'name' (model), the key specs from 'attributes' (label: value, e.g. max " +
             "weight, folding), 'rating'/'reviews' if present (e.g. ★4.6 · 7 reviews), the 'total' plus 'price_per_day'/'days', " +
             "the 'delivery_options' block (label + price, marking free ones as Free — offer ONLY these), and " +
             "'free_cancellation_until' (e.g. 'Free cancellation before <date>'). Do NOT be terse and do NOT collapse these to " +
@@ -480,6 +483,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             name: modelName || detail.name,
             model: modelName || null,
             type: detail.type,
+            category: [detail.type, load?.subtype].filter(Boolean).join(" · ") || null, // "Electric wheelchair · Standard"
             attributes: specAttributes, // specs riques (pes màx, autonomia, plegable, tipus…)
             image_url: imageUrl,
           },

@@ -573,7 +573,8 @@ export async function getDetails(apiBase: string, a: DetailsArgs): Promise<Detal
 export interface ProductLoad {
   brand: string | null;
   model: string | null;
-  title: string | null; // brand + model (el títol que mostra el web)
+  title: string | null; // brand + model + material + featured (el títol que mostra el web)
+  subtype: string | null; // valor de l'atribut "type" (p. ex. "Standard", "Portable", "Postural")
   image: string | null; // filename de la imatge real del producte
   attributes: Array<{ label: string; value: string }>;
 }
@@ -615,11 +616,22 @@ export async function getProductLoad(apiBase: string, a: ProductLoadArgs): Promi
   }
   const brand = map.get("brand")?.value || null;
   const model = map.get("model")?.value || null;
-  const title = [brand, model].filter(Boolean).join(" ").trim() || null;
+  // Nom complet com el web: brand + model + material (si != "No information") + featured.
+  // (load-product.phtml: print brand." ".model.$materialFeatured)
+  const material = map.get("material")?.value || "";
+  const materialPart = material && material !== "No information" ? material : "";
+  const featuredPart = (map.get("featured")?.value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+  const title = [brand, model, materialPart, featuredPart].filter(Boolean).join(" ").trim() || null;
+  const subtype = map.get("type")?.value || null; // p. ex. "Standard" → categoria "Electric wheelchair · Standard"
   const image = map.get("image")?.value || row.image || null;
+  // material i featured ja van dins el nom → no els repetim com a badge (com el web).
   const attributes = [...map.entries()]
-    .filter(([code]) => !LOAD_ATTR_HIDE.has(code))
+    .filter(([code]) => !LOAD_ATTR_HIDE.has(code) && code !== "material" && code !== "featured")
     .slice(0, 12)
     .map(([, v]) => v);
-  return { brand, model, title, image, attributes };
+  return { brand, model, title, subtype, image, attributes };
 }

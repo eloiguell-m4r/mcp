@@ -9,14 +9,16 @@ manual de Claude Desktop).
 > `/submission`.
 
 ## Requisits previs (compte)
-- Pla **Team o Enterprise** de Claude (els plans individuals no tenen *admin settings*).
+
+- Pla **Team o Enterprise** de Claude (els plans individuals no tenen _admin settings_).
 - Rol **Owner / Primary Owner** (o un rol amb permís "Directory management").
 
 ## Requisits tècnics del servidor
+
 - **HTTPS** + transport **Streamable HTTP** (l'HTTP+SSE està en desús). ✅ Ja el tenim.
 - Límit de resultat ~150.000 caràcters i timeout de 300 s per crida. ✅ Complim de sobres.
 - **Autenticació**: el formulari d'alta ofereix **OAuth 2.0 / connexió personalitzada / cap
-  (none)**. La regla d'Anthropic és *"si el servei és autenticat, ha de ser OAuth 2.0"* — NO
+  (none)**. La regla d'Anthropic és _"si el servei és autenticat, ha de ser OAuth 2.0"_ — NO
   que hagi de ser autenticat. Per tant hi ha dues vies:
   - **(A) Públic ("none")**: no tenim comptes ni dades per usuari (la PII és com un formulari
     públic, el pagament el tanca Stripe) → aquesta via és vàlida i la més ràpida. Cal afegir
@@ -36,6 +38,7 @@ manual de Claude Desktop).
     de compliment de **transaccions**; anotar-la com a no-read-only i descriure-la bé.
 
 ## Materials a preparar
+
 - **URL de documentació** pública del connector.
 - **URL de política de privadesa** (recollida/ús/emmagatzematge/retenció/tercers/contacte).
 - **Icona** i **captures (carousel)** si exposem MCP Apps.
@@ -44,6 +47,7 @@ manual de Claude Desktop).
 - Textos del listing: **nom** (≤100), **tagline** (≤55), **descripció** (≤2000), categories.
 
 ## Procés d'enviament (formulari d'11 passos)
+
 Portal: **`https://claude.ai/admin-settings/directory/submissions/new`**
 
 1. **Introducció** — reconeixes que llistar-lo el fa descobrible.
@@ -62,6 +66,7 @@ Portal: **`https://claude.ai/admin-settings/directory/submissions/new`**
 11. **Revisió** — verificació final i enviament.
 
 ## Revisió
+
 - Anthropic fa proves funcionals de cada tool + escaneig de compliment de polítiques
   (disseny de tools, auth, privadesa, enllaços externs permesos, assets, documentació,
   suport, i que es comporti bé quan es criden totes les tools).
@@ -70,6 +75,7 @@ Portal: **`https://claude.ai/admin-settings/directory/submissions/new`**
 - Escalat: **mcp-review@anthropic.com**.
 
 ## Resum del que ens falta abans d'enviar
+
 1. ✅ **Auth (A) públic + rate-limiting** implementat (`server.ts`): `/mcp` públic per defecte,
    bearer com a bypass intern, rate-limit per IP. (Falta desplegar-ho a prod.)
 2. ✅ **Anotacions** afegides a totes les tools (`tools.ts`): lectura → `readOnlyHint: true`;
@@ -77,10 +83,11 @@ Portal: **`https://claude.ai/admin-settings/directory/submissions/new`**
 3. ✅ **Política de privadesa**: afegida la secció "Booking through our AI assistant (Claude)"
    a `privacy.phtml` en tots els idiomes del web. (Falta desplegar el web.)
 4. Preparar **compte + guió de prova** per als revisors (truc de Sevilla).
-5. Tenir pla **Team/Enterprise** amb rol Owner per accedir al portal.
+5. ✅ Tenir pla **Team/Enterprise** amb rol Owner per accedir al portal.
 6. Preparar textos del listing (nom, tagline, descripció, categories, icona).
 
 ## Fonts
+
 - [Building custom connectors (docs oficials)](https://claude.com/docs/connectors/building)
 - [Get started with custom connectors using remote MCP](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
 - [Claude Connector Directory Submission (guia de tercers)](https://sunpeak.ai/blogs/claude-connector-directory-submission/)

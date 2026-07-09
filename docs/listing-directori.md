@@ -61,6 +61,39 @@ processa **Stripe** (no rebem ni guardem dades de targeta).
 - Autenticació: **cap (públic)** + rate-limit per IP (o OAuth més endavant)
 
 ## Instruccions de prova per als revisors
+
+### ▶ PER ENGANXAR AL FORMULARI (anglès)
+```
+No account or login is required — this is a public connector.
+
+IMPORTANT — which product to book: the booking test must be done ONLY with the
+"Invacare Leo" mobility scooter in Seville, which belongs to our test store. The
+Seville search also returns a "Manual wheelchair" from a REAL partner store — do NOT
+book that one, as it would create a real reservation. Never book "the first result".
+
+Test window: any Friday, with pickup and return at 23:00 (this time window makes
+Seville show availability even outside opening hours). Example: Friday 2026-07-24
+(use any future Friday).
+
+1) Discovery — Prompt: "Search mobility scooters in Seville for Friday 2026-07-24,
+   pickup and return at 23:00." Returns products with the final price (taxes and
+   management fee included), photo, specs and delivery options.
+2) Details — Prompt: "Show full details of the Invacare Leo mobility scooter."
+   Returns deposit, delivery options and extras.
+3) Booking (Invacare Leo ONLY) — Prompt: "Book the Invacare Leo mobility scooter for
+   John Tester, john@example.com, +34600000000, Spain." create_booking returns a
+   secure Stripe payment link (urlTpv). The booking is created as an UNPAID HOLD and
+   NO charge occurs unless the link is opened and paid — you can ignore it or let it
+   expire.
+
+Other read-only tools you can exercise safely:
+- check_city_coverage: "Do you operate in Barcelona?"
+- list_currencies: "Which currencies can I see prices in?"
+- list_product_options / get_rental_details on any product.
+- Policies & FAQ: "What is the cancellation policy?"
+```
+
+### Notes internes (no enganxar)
 > No cal cap compte ni login (connector públic).
 
 ⚠️ **MOLT IMPORTANT — quin producte reservar.** La reserva de prova s'ha de fer NOMÉS amb el
