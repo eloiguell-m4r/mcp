@@ -661,7 +661,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           "confirmation after payment. ERROR 'delivery_type_not_available' means THIS PRODUCT/STORE does not offer that " +
           "delivery type — it is NOT about the address: offer store pickup or the booking_link, do not blame the address. " +
           "If the response indicates fallback (supplier requires the full checkout), use the 'booking_link' from " +
-          "search_mobility_rentals instead.",
+          "search_mobility_rentals instead. ⚠️ COVERAGE: delivery is only available in the city/area you SEARCHED where " +
+          "the product is offered. NEVER deliver to a different town than the one searched, and NEVER create a booking just " +
+          "to 'check' if an out-of-area address is covered or to find out a distance surcharge — the server does NOT validate " +
+          "address coverage. If the user's delivery address is outside the covered city (e.g. a nearby town with no " +
+          "availability), tell them delivery/coverage there is NOT available through this assistant and to contact " +
+          "Motion4Rent directly (contact form https://www.motion4rent.com/contact, email info@motion4rent.com, phone/WhatsApp " +
+          "+34 932 20 15 13). Do NOT invent coverage rules or surcharges.",
         inputSchema: {
           id_product_store: z.number().describe("id_product_store from the search result. [Seville test: 559]"),
           id_store: z.number().describe("id_store from the search result. [Seville test: 76]"),

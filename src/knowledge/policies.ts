@@ -43,8 +43,15 @@ export const POLICIES: Policy[] = [
     id: "delivery_coverage",
     topic: "delivery",
     title: "Delivery coverage & cost",
-    keywords: ["delivery cost", "coverage", "area", "surcharge", "coste", "cobertura", "área urbana", "suplemento"],
-    text: "La entrega y la recogida a domicilio dentro del área urbana de la ciudad donde se presta el servicio están incluidas en el alquiler. Para direcciones fuera del área urbana puede aplicarse un suplemento en función de la distancia. La cobertura y el suplemento concretos para una dirección y unas fechas se confirman al hacer la reserva.",
+    keywords: ["delivery cost", "coverage", "area", "surcharge", "coste", "cobertura", "área urbana", "suplemento", "fuera de zona", "otra localidad"],
+    text: "La entrega y recogida solo está disponible en las ciudades y zonas donde Motion4rent presta servicio para ese producto y esas fechas: son las opciones de entrega que se muestran al buscar (recogida en tienda, domicilio/hotel, aeropuerto o crucero). Motion4rent no entrega en direcciones fuera de esa zona de cobertura. Si tu dirección está en otra localidad o no aparece ninguna opción de entrega para esa ciudad, la entrega NO se puede confirmar de forma automática ni por este asistente: hay que ponerse en contacto con Motion4rent para comprobar si es posible. No se debe iniciar una reserva solo para 'comprobar' la cobertura de una dirección fuera de zona.",
+  },
+  {
+    id: "contact",
+    topic: "contact",
+    title: "Contact Motion4Rent",
+    keywords: ["contact", "help", "phone", "whatsapp", "email", "form", "support", "contacto", "contacte", "ayuda", "teléfono", "correo", "formulario", "atención"],
+    text: "Puedes contactar con Motion4rent a través de: formulario de contacto en https://www.motion4rent.com/contact, correo electrónico info@motion4rent.com, o teléfono y WhatsApp en el +34 932 20 15 13. El equipo confirma disponibilidad y coberturas de entrega especiales (por ejemplo, direcciones fuera de la zona habitual), resuelve dudas y ayuda a completar reservas.",
   },
   {
     id: "folding",
