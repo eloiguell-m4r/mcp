@@ -26,6 +26,18 @@ import { findPolicies } from "./knowledge/policies.js";
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data en format YYYY-MM-DD");
 const MAX_PRODUCTS = 25;
 
+// Noms de ciutat que existeixen a diversos països (ES ↔ Amèrica Llatina, etc.). El geocoder de
+// Motion4Rent només coneix ciutats COBERTES, així que per aquests noms retorna només la ciutat
+// espanyola i assumiria Espanya en silenci. Si l'usuari no ha indicat país, cal CONFIRMAR-ho.
+// Clau NORMALITZADA (sense accents, minúscules — el que retorna normText). NOMÉS noms on la
+// confusió de país és REALMENT probable (l'altra ciutat és gran/coneguda). NO hi posem noms
+// com "Barcelona"/"Zaragoza" que gairebé sempre volen dir la ciutat espanyola (seria molest):
+// per a aquests, el resum ja indica el país igualment i l'usuari pot corregir.
+const AMBIGUOUS_CITY_NAMES = new Set([
+  "cordoba", "cordova", "valencia", "santiago", "guadalajara", "merida", "leon", "cartagena",
+  "trujillo", "cuenca", "granada", "toledo", "salamanca", "valladolid", "santander", "medellin",
+]);
+
 /** Normalitza una hora ("10:00", "1000", "10", "9:30") a HHMM de 4 dígits. undefined si no és vàlida. */
 function toApiTime(t?: string): string | undefined {
   if (!t) return undefined;
@@ -195,6 +207,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           ? place.cityEs ?? place.cityEn ?? city
           : place.cityEn ?? place.cityEs ?? city;
 
+        // Nom ambigu i l'usuari no ha dit país → hem ASSUMIT la ciutat coberta (normalment ES).
+        // Cal que el client ho confirmi (podria voler la Córdoba d'Argentina, etc.).
+        const confirmCountry = !country && AMBIGUOUS_CITY_NAMES.has(normText(city));
+
         const bookingLink = buildResultsLink(config.webBaseUrl, {
           language: lang,
           urlCiudad: place.url || slugCiudad(city),
@@ -342,16 +358,22 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         const effectiveCount = typeFilterLabel ? matchedCount : search.number;
         const truncated = effectiveCount > shown.length;
         const scope = typeFilterLabel ? `${typeFilterLabel} option(s)` : `rental option(s)`;
+        const confirmMsg = confirmCountry
+          ? ` ⚠️ '${city}' exists in several countries; these results are for ${name} (${place.country.toUpperCase()}). CONFIRM with the user this is the ${place.country.toUpperCase()} city they mean before booking.`
+          : "";
         const summary =
           search.number > 0
-            ? `Motion4Rent has ${effectiveCount} ${scope} in ${name} (${start_date} → ${end_date}). ` +
-              `Showing ${shown.length}${truncated ? ` of ${effectiveCount} (open the booking link for the rest)` : " (all of them)"}. Booking link: ${bookingLink}`
-            : `Motion4Rent has no availability in ${name} for these dates. Link to review/other dates: ${bookingLink}`;
+            ? `Motion4Rent has ${effectiveCount} ${scope} in ${name}, ${place.country.toUpperCase()} (${start_date} → ${end_date}). ` +
+              `Showing ${shown.length}${truncated ? ` of ${effectiveCount} (open the booking link for the rest)` : " (all of them)"}.${confirmMsg} Booking link: ${bookingLink}`
+            : `Motion4Rent has no availability in ${name}, ${place.country.toUpperCase()} for these dates.${confirmMsg} Link to review/other dates: ${bookingLink}`;
 
         return jsonResult(summary, {
           provider: "Motion4Rent",
           city: name,
           country: place.country,
+          // Nom ambigu sense país indicat → confirma amb l'usuari abans de reservar.
+          confirm_country: confirmCountry,
+          resolved_city: `${name} (${place.country.toUpperCase()})`,
           dates: { start: start_date, end: end_date },
           available: search.number > 0,
           count: effectiveCount,
@@ -361,6 +383,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
+            "The city was resolved to 'resolved_city' (name + country) — Motion4Rent's coverage list only knows cities it " +
+            "operates in, so it will silently pick the covered one. If 'confirm_country' is true (or the user named a city " +
+            "WITHOUT a country that can exist in several countries, e.g. Córdoba ES/AR/MX), CONFIRM with the user this is the " +
+            "right country/city before booking; do NOT assume Spain. " +
             "These rentals are offered by MOTION4RENT. 'total' is the FINAL price per product (already includes the " +
             "management fee and taxes) — quote it AS-IS. Do NOT add, estimate or mention any extra fee, and do NOT say " +
             "'from'/'approx'. Present a COMPLETE, RICH card for EACH option — mirror the website: the photo (clickable " +
