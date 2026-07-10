@@ -367,7 +367,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             "markdown image ![name](image_url)), the 'category' as a small heading ABOVE the name (e.g. 'Electric " +
             "wheelchair · Standard'), the full 'name' (model), the key specs from 'attributes' (label: value, e.g. max " +
             "weight, folding), 'rating'/'reviews' if present (e.g. ★4.6 · 7 reviews), the 'total' plus 'price_per_day'/'days', " +
-            "the 'delivery_options' block (label + price, marking free ones as Free — offer ONLY these), any optional " +
+            "the 'delivery_options' block (label + price, marking free ones as Free — offer ONLY these; delivery exists only " +
+            "where a store serves that city, so NEVER offer/imply delivery to a nearby town with no store — for that, give the " +
+            "Motion4Rent contact channels: form https://www.motion4rent.com/contact, email info@motion4rent.com, phone +34 932 20 15 13, " +
+            "WhatsApp +34 931 66 70 77), any optional " +
             "'extras' (add-ons: name + price + per_day/flat — mention when the list is non-empty so the user knows they exist), and " +
             "'free_cancellation_until' (e.g. 'Free cancellation before <date>'). Do NOT be terse and do NOT collapse these to " +
             "a bare price. Do NOT show internal ids (id_product_store/id_store) or the store name. For the exact breakdown/extras " +
@@ -661,13 +664,14 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           "confirmation after payment. ERROR 'delivery_type_not_available' means THIS PRODUCT/STORE does not offer that " +
           "delivery type — it is NOT about the address: offer store pickup or the booking_link, do not blame the address. " +
           "If the response indicates fallback (supplier requires the full checkout), use the 'booking_link' from " +
-          "search_mobility_rentals instead. ⚠️ COVERAGE: delivery is only available in the city/area you SEARCHED where " +
-          "the product is offered. NEVER deliver to a different town than the one searched, and NEVER create a booking just " +
-          "to 'check' if an out-of-area address is covered or to find out a distance surcharge — the server does NOT validate " +
-          "address coverage. If the user's delivery address is outside the covered city (e.g. a nearby town with no " +
-          "availability), tell them delivery/coverage there is NOT available through this assistant and to contact " +
-          "Motion4Rent directly (contact form https://www.motion4rent.com/contact, email info@motion4rent.com, phone/WhatsApp " +
-          "+34 932 20 15 13). Do NOT invent coverage rules or surcharges.",
+          "search_mobility_rentals instead. ⚠️ COVERAGE (critical): delivery ONLY exists where there is a store (physical or " +
+          "virtual) that serves that place — i.e. the delivery_options returned for that city. Being NEAR a covered city is " +
+          "NOT enough: NEVER offer or imply delivery to a town/address that has no store of its own, and NEVER create a " +
+          "booking to 'check' coverage or a distance surcharge (the server does NOT validate address coverage). You MAY " +
+          "suggest renting in the nearest covered city (store pickup or delivery WITHIN that city), but for the uncovered " +
+          "place you MUST tell the user delivery there is not available through this assistant and give ALL Motion4Rent " +
+          "contact channels: contact form https://www.motion4rent.com/contact, email info@motion4rent.com, phone (calls) " +
+          "+34 932 20 15 13, and WhatsApp +34 931 66 70 77 (different number — offer both). Do NOT invent coverage or surcharges.",
         inputSchema: {
           id_product_store: z.number().describe("id_product_store from the search result. [Seville test: 559]"),
           id_store: z.number().describe("id_store from the search result. [Seville test: 76]"),

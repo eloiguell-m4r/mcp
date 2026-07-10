@@ -44,14 +44,14 @@ export const POLICIES: Policy[] = [
     topic: "delivery",
     title: "Delivery coverage & cost",
     keywords: ["delivery cost", "coverage", "area", "surcharge", "coste", "cobertura", "área urbana", "suplemento", "fuera de zona", "otra localidad"],
-    text: "La entrega y recogida solo está disponible en las ciudades y zonas donde Motion4rent presta servicio para ese producto y esas fechas: son las opciones de entrega que se muestran al buscar (recogida en tienda, domicilio/hotel, aeropuerto o crucero). Motion4rent no entrega en direcciones fuera de esa zona de cobertura. Si tu dirección está en otra localidad o no aparece ninguna opción de entrega para esa ciudad, la entrega NO se puede confirmar de forma automática ni por este asistente: hay que ponerse en contacto con Motion4rent para comprobar si es posible. No se debe iniciar una reserva solo para 'comprobar' la cobertura de una dirección fuera de zona.",
+    text: "La entrega solo existe si hay una tienda (física o virtual) que da servicio a esa localidad; son las opciones de entrega que aparecen al buscar. La simple cercanía a una ciudad con tienda NO implica que se pueda entregar en el pueblo o dirección de al lado. Si al buscar una localidad no aparece ninguna opción de entrega (no hay tienda para esa zona), Motion4rent NO puede entregar allí a través de este asistente, aunque haya una ciudad cubierta cerca: NO se debe ofrecer ni preparar una reserva para 'comprobar' la cobertura. En ese caso hay que remitir a la persona a contactar con Motion4rent (formulario de contacto, email, teléfono o WhatsApp) para confirmar si es posible una entrega especial.",
   },
   {
     id: "contact",
     topic: "contact",
     title: "Contact Motion4Rent",
     keywords: ["contact", "help", "phone", "whatsapp", "email", "form", "support", "contacto", "contacte", "ayuda", "teléfono", "correo", "formulario", "atención"],
-    text: "Puedes contactar con Motion4rent a través de: formulario de contacto en https://www.motion4rent.com/contact, correo electrónico info@motion4rent.com, o teléfono y WhatsApp en el +34 932 20 15 13. El equipo confirma disponibilidad y coberturas de entrega especiales (por ejemplo, direcciones fuera de la zona habitual), resuelve dudas y ayuda a completar reservas.",
+    text: "Puedes contactar con Motion4rent por cualquiera de estos canales (ofrécelos TODOS): formulario de contacto https://www.motion4rent.com/contact ; correo electrónico info@motion4rent.com ; teléfono de llamadas +34 932 20 15 13 ; WhatsApp +34 931 66 70 77 (https://wa.me/34931667077). Importante: el teléfono de llamadas y el de WhatsApp son NÚMEROS DISTINTOS. El equipo confirma disponibilidad, coberturas de entrega fuera de la zona habitual y ayuda con las reservas.",
   },
   {
     id: "folding",
