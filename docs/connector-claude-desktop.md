@@ -19,9 +19,10 @@ si fos un MCP local.
 > Connectors, sense `mcp-remote` ni bearer.
 
 ## Fitxer de configuració
-`~/Library/Application Support/Claude/claude_desktop_config.json`
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json` → vegeu la secció **"Com editar el config a WINDOWS"** (el JSON és lleugerament diferent: `cmd /c npx`).
 
-Afegeix (o fusiona) dins de `mcpServers`:
+El JSON de sota és per a **macOS**. Afegeix (o fusiona) dins de `mcpServers`:
 
 ```json
 {
@@ -50,6 +51,126 @@ Amb l'endpoint públic, el bearer és **opcional però recomanat**: sense ell el
 funciona (fins que topi amb el rate-limit); amb ell, salta el límit. Si el servidor s'executés en
 mode privat (`MCP_REQUIRE_AUTH=true`), aleshores el bearer sí que seria **obligatori**.
 
+### Variant SENSE Authorization (connector públic)
+Com que `/mcp` és públic, també funciona **sense** la línia del bearer (només perds el bypass del
+rate-limit). Útil per instal·lar-lo a algú sense donar-li el token:
+
+```json
+{
+  "mcpServers": {
+    "motion4rent-mcp": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.1.16",
+        "https://mcp.motion4rent.com/mcp"
+      ],
+      "env": {
+        "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    }
+  }
+}
+```
+
+## Com editar el config pas a pas (instal·lar-lo a un altre Mac)
+
+**Requisit previ — Node.js (aporta `npx`):**
+1. Obre **Terminal** i escriu: `which npx`
+   - Si torna una ruta (p. ex. `/opt/homebrew/bin/npx`), ja el tens → **apunta-la**, la faràs servir a `command`.
+   - Si no torna res: instal·la Node des de <https://nodejs.org> (instal·lador `.pkg`) o amb Homebrew
+     (`brew install node`) i torna a fer `which npx`.
+   - Rutes típiques: Apple Silicon (M1/M2/M3) → `/opt/homebrew/bin/npx`; Intel o instal·lador de
+     nodejs.org → `/usr/local/bin/npx`. **Usa la que et doni `which npx`** (i posa la seva carpeta a `env.PATH`).
+
+**Editar el fitxer:**
+1. **Obre'l** (crea la carpeta i el fitxer si no existeixen). A Terminal:
+   ```bash
+   mkdir -p ~/Library/Application\ Support/Claude
+   touch ~/Library/Application\ Support/Claude/claude_desktop_config.json
+   open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json
+   ```
+   S'obre a TextEdit. (Alternativa gràfica: Finder → menú **Anar → Anar a la carpeta…** (⇧⌘G) →
+   enganxa `~/Library/Application Support/Claude/` → obre `claude_desktop_config.json`.)
+   ⚠️ Si uses **TextEdit**, posa'l en text net: **Format → Convertir en text net** (⇧⌘T), perquè no
+   canviï les cometes `"` per cometes corbes `"` `"`, que **trenquen el JSON**. Millor encara: obre'l amb **VS Code**.
+2. **Enganxa la configuració:**
+   - Si el fitxer està **buit** → enganxa el bloc JSON sencer (amb o sense Authorization).
+   - Si **ja té contingut** (altres `mcpServers`, `preferences`, etc.) → **no esborris res**. Afegeix
+     només l'entrada `"motion4rent-mcp": { … }` **dins** de l'objecte `"mcpServers"` existent, separada
+     amb una **coma** de les altres entrades. Si no hi ha `"mcpServers"`, crea'l al primer nivell.
+3. **Ajusta** `command` i `env.PATH` a la ruta de `npx` de `which npx`. Si vols bearer, substitueix
+   `<MCP_AUTH_TOKEN>`; si no, fes servir la variant sense Authorization.
+4. **Desa** (⌘S). Verifica que el JSON és vàlid (claus i comes ben tancades) — pots enganxar-lo a
+   `jsonlint.com` per comprovar-ho.
+5. **Reinicia Claude Desktop DEL TOT**: **⌘Q** (no només tancar la finestra) i torna'l a obrir.
+6. **Verifica**: han d'aparèixer les tools de `motion4rent-mcp`. Prova: *"Search mobility scooters in Barcelona"*.
+
+> Exemple de **fusió** quan el fitxer ja tenia una altra entrada:
+> ```json
+> {
+>   "mcpServers": {
+>     "un-altre-server": { "command": "…" },
+>     "motion4rent-mcp": { "command": "/opt/homebrew/bin/npx", "args": ["-y","mcp-remote@0.1.16","https://mcp.motion4rent.com/mcp"], "env": { "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" } }
+>   }
+> }
+> ```
+> (Fixa't en la **coma** entre les dues entrades.)
+
+## Com editar el config a WINDOWS
+
+Fitxer: **`%APPDATA%\Claude\claude_desktop_config.json`**
+(= `C:\Users\<usuari>\AppData\Roaming\Claude\claude_desktop_config.json`).
+
+A Windows, Claude Desktop sovint **no** sap arrencar `npx` directament (és un `.cmd`); el patró que
+funciona és cridar-lo via `cmd /c`. Per això el JSON és una mica diferent del de Mac:
+
+```json
+{
+  "mcpServers": {
+    "motion4rent-mcp": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "mcp-remote@0.1.16",
+        "https://mcp.motion4rent.com/mcp",
+        "--header",
+        "Authorization:Bearer <MCP_AUTH_TOKEN>"
+      ]
+    }
+  }
+}
+```
+
+Sense bearer (connector públic): treu les dues últimes línies dels `args`
+(`"--header"` i `"Authorization:Bearer <MCP_AUTH_TOKEN>"`).
+
+> A Windows normalment **no cal `env.PATH`**: `cmd` ja troba `npx` al PATH del sistema (l'instal·lador
+> de Node l'hi afegeix). Si `npx` no es troba, alternativa: posa la ruta completa, p. ex.
+> `"command": "C:\\Program Files\\nodejs\\npx.cmd"` (barres invertides **dobles**) i treu `"cmd"`,`"/c"`.
+
+**Passos:**
+1. **Node.js**: instal·la des de <https://nodejs.org> (instal·lador `.msi`). Comprova a **PowerShell**:
+   `npx --version` (i `where npx` per veure la ruta).
+2. **Obre la carpeta**: `Win + R` → escriu `%APPDATA%\Claude` → Enter (s'obre a l'Explorador).
+3. **Crea/obre el fitxer** (si no existeix). El més robust, a **PowerShell**:
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:APPDATA\Claude" | Out-Null
+   if (!(Test-Path "$env:APPDATA\Claude\claude_desktop_config.json")) { '{}' | Out-File -Encoding utf8 "$env:APPDATA\Claude\claude_desktop_config.json" }
+   notepad "$env:APPDATA\Claude\claude_desktop_config.json"
+   ```
+   ⚠️ Si el crees des de l'Explorador (Nou → Document de text): activa **Visualització → Extensions de
+   nom de fitxer** i assegura't que es diu `claude_desktop_config.json` i **no** `...json.txt`.
+4. **Enganxa/fusiona** igual que a Mac (buit → tot el bloc; amb contingut → afegeix només l'entrada
+   `motion4rent-mcp` dins `mcpServers`, amb la coma). Notepad a Windows **no** posa cometes corbes, així
+   que és segur; tot i així VS Code va millor.
+5. **Desa** (⌘/Ctrl+S). Si uses Notepad i "Desa com a", tria **Tipus: Tots els fitxers** i codificació **UTF-8**.
+6. **Tanca Claude Desktop DEL TOT**: es queda a la **safata del sistema** (a prop del rellotge) →
+   clic dret a la icona → **Quit/Sortir** (tancar la finestra NO n'hi ha prou). Torna'l a obrir.
+7. **Verifica**: han de sortir les tools de `motion4rent-mcp`. Prova *"Search mobility scooters in Barcelona"*.
+
 ## Detalls que importen (i per què)
 - **`command` amb ruta absoluta `/opt/homebrew/bin/npx`**: Claude Desktop NO hereta el
   PATH del shell; amb `npx` pelat no el troba i el connector falla. (Homebrew a Apple
@@ -59,11 +180,6 @@ mode privat (`MCP_REQUIRE_AUTH=true`), aleshores el bearer sí que seria **oblig
   acceptant `--header`.
 - **`--header "Authorization:Bearer …"`**: sense espai després dels dos punts de `Authorization:`
   (format que espera `mcp-remote`); l'espai va abans del token, dins del valor.
-
-## Aplicar canvis
-Després d'editar el JSON, **surt del tot de Claude Desktop i torna'l a obrir** (no n'hi ha
-prou amb tancar la finestra). Comprova que apareguin les tools de `motion4rent-mcp`
-(search_mobility_rentals, get_rental_details, create_booking, list_currencies…).
 
 ## Verificar / depurar
 - Health del servidor: `curl https://mcp.motion4rent.com/health` → `{ ok: true, … }`.
