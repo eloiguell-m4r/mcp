@@ -199,20 +199,49 @@ export async function searchResults(apiBase: string, a: SearchArgs): Promise<Sea
 }
 
 // ---------------------------------------------------------------------------
-// Moneda (dinàmica): la font de veritat és la taula exchange_rates de l'API.
-// getActiveCurrencies → llista de monedes disponibles (si demà se n'afegeix una
-// a exchange_rates, apareix aquí sense tocar codi). getExchangeRate → mateix
-// 'rate' que fa servir el web a exchange() (coherent amb el que cobra el booking).
+// Moneda (dinàmica). DOS conceptes diferents:
+//  · getActiveCurrencies → monedes en què el CLIENT pot PAGAR (taula payment_currencies via
+//    /exchange/payment-currencies). És el set que s'ofereix a l'usuari (EUR/USD/GBP/CNY/JPY).
+//  · getExchangeRate → tipus de canvi (exchange_rates) per convertir imports; mateix 'rate' que
+//    el web a exchange(). NO és el set de pagament (inclou AUD/NZD, etc.).
 // ---------------------------------------------------------------------------
 
-/** Monedes actives de la plataforma (de /exchange/rates-to-eur). EUR sempre primer. */
-export async function getActiveCurrencies(apiBase: string): Promise<string[]> {
-  // Llista de monedes = gairebé estàtica → cachejat (TTL llarg). NO cachegem els rates (getExchangeRate).
-  return memo(`cur:${apiBase}`, 30 * 60_000, async () => {
-    const body = unwrapBody(await getJson(`${apiBase}/exchange/rates-to-eur`, DEFAULT_TIMEOUT_MS));
-    const map = body && typeof body === "object" && body.data && typeof body.data === "object" ? body.data : {};
-    const codes = Object.keys(map).map((c) => c.toUpperCase());
-    return ["EUR", ...codes.filter((c) => c !== "EUR").sort()];
+export interface PaymentCurrency {
+  code: string; // ISO-4217 (EUR, USD…)
+  symbol: string; // €, $, £, ¥
+  label: string; // Euro, US Dollar…
+  decimals: number; // 2, o 0 per JPY
+}
+
+// Fallback (les 5 actuals) si l'endpoint encara no existeix (API no desplegada) o falla.
+const DEFAULT_PAYMENT_CURRENCIES: PaymentCurrency[] = [
+  { code: "EUR", symbol: "€", label: "Euro", decimals: 2 },
+  { code: "USD", symbol: "$", label: "US Dollar", decimals: 2 },
+  { code: "GBP", symbol: "£", label: "Pound Sterling", decimals: 2 },
+  { code: "CNY", symbol: "¥", label: "Yuan", decimals: 2 },
+  { code: "JPY", symbol: "¥", label: "Yen", decimals: 0 },
+];
+
+/** Monedes de PAGAMENT del client (font única: /exchange/payment-currencies). EUR primer per ordre. */
+export async function getActiveCurrencies(apiBase: string): Promise<PaymentCurrency[]> {
+  // Set gairebé estàtic → cachejat (TTL llarg). NO cachegem els rates (getExchangeRate).
+  return memo(`paycur:${apiBase}`, 30 * 60_000, async () => {
+    try {
+      const body = unwrapBody(await getJson(`${apiBase}/exchange/payment-currencies`, DEFAULT_TIMEOUT_MS));
+      const rows: any[] = Array.isArray(body?.currencies) ? body.currencies : [];
+      const list = rows
+        .map((r) => ({
+          code: String(r.code ?? "").toUpperCase(),
+          symbol: String(r.symbol ?? ""),
+          label: String(r.label ?? r.code ?? ""),
+          decimals: Number.isFinite(Number(r.decimals)) ? Number(r.decimals) : 2,
+        }))
+        .filter((c) => c.code);
+      return list.length ? list : DEFAULT_PAYMENT_CURRENCIES;
+    } catch {
+      // Endpoint no disponible (API no desplegada encara) → defaults, mai error.
+      return DEFAULT_PAYMENT_CURRENCIES;
+    }
   });
 }
 

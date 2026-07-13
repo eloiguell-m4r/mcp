@@ -599,16 +599,17 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       title: "Available currencies (Motion4Rent)",
       annotations: { readOnlyHint: true, openWorldHint: true },
       description:
-        "Returns the currencies the user can view prices and pay in (dynamic platform list). Use it to ASK the user " +
-        "which currency they want for prices and booking, and pass the chosen one as 'currency' to " +
+        "Returns the currencies the user can PAY in (the platform's customer payment set). Use it to ASK the user " +
+        "which currency they want for prices and booking, and pass the chosen 'code' as 'currency' to " +
         "search_mobility_rentals / get_rental_details / create_booking. If not given, the product currency is used.",
       inputSchema: {},
     },
     async () => {
       try {
         const currencies = await getActiveCurrencies(config.apiBaseUrl);
+        const labels = currencies.map((c) => `${c.symbol} ${c.code}`).join(", ");
         return jsonResult(
-          `Available currencies: ${currencies.join(", ")}. Ask the user which one and pass it as 'currency'.`,
+          `Currencies you can pay in: ${labels}. Ask the user which one and pass its 'code' as 'currency'.`,
           { currencies, default: "product currency if none is given" },
         );
       } catch (e) {
