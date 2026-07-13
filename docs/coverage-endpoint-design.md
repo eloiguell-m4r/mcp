@@ -149,8 +149,8 @@ Fitxers:
 - **API** `motion4rent-api/routes/ai.js` — `GET /ai/cities/:city` ara retorna també
   `homonym: { ambiguous, countries, covered_countries }` (try/catch: si la taula no existeix, `homonym: null`).
 - **MCP** `src/m4rApi.ts` — `GeocodeResult.homonymAmbiguous` (llegit de `body.homonym.ambiguous`; `null` si l'API no ho dóna).
-- **MCP** `src/tools.ts` — `confirm_country = !country && (geo.homonymAmbiguous ?? AMBIGUOUS_CITY_NAMES.has(...))`.
-  La llista local queda com a **FALLBACK** fins que l'API estigui desplegada; després es pot treure.
+- **MCP** `src/tools.ts` — `confirm_country = !country && geo.homonymAmbiguous === true`.
+  ✅ La llista local `AMBIGUOUS_CITY_NAMES` s'ha **eliminat** (font única = API/`city_homonyms`).
 
 Ordre de desplegament (compatible cap enrere en tot moment):
 1. **Migració BD**: executar `sql/2026-07-13-city-homonyms.sql` a la/les BD que llegeix l'API
@@ -159,7 +159,7 @@ Ordre de desplegament (compatible cap enrere en tot moment):
    `curl https://…/ai/cities/cordoba` → `body.homonym.ambiguous = true`.
 3. **MCP**: desplegar (git pull + build + restart). A partir d'aquí usa el senyal de l'API;
    el fallback local només actua si `homonym` ve `null`.
-4. (Opcional, després) treure `AMBIGUOUS_CITY_NAMES` del MCP quan es confirmi que l'API sempre respon `homonym`.
+4. ✅ FET — `AMBIGUOUS_CITY_NAMES` tret del MCP; la font única és l'API/`city_homonyms`.
 
 Manteniment: afegir noms nous és un `INSERT ... ON DUPLICATE KEY UPDATE` a `city_homonyms` (cap desplegament de codi).
 
