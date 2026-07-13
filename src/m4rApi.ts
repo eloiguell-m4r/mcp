@@ -81,6 +81,9 @@ export interface GeocodeResult {
   count: number;
   countries: number; // > 1 → homònimes, cal desambiguar
   places: GeoPlace[];
+  // Homonímia GLOBAL (de city_homonyms via l'API): true si el nom és una ciutat coneguda a >1 país
+  // encara que aquí només en cobrim un. null si l'API encara no ho retorna (fallback al client).
+  homonymAmbiguous: boolean | null;
 }
 
 export async function geocodeCity(apiBase: string, city: string): Promise<GeocodeResult> {
@@ -104,6 +107,7 @@ export async function geocodeCity(apiBase: string, city: string): Promise<Geocod
     count: Number(body?.count ?? places.length),
     countries: Number(body?.countries ?? new Set(places.map((p) => p.country)).size),
     places,
+    homonymAmbiguous: typeof body?.homonym?.ambiguous === "boolean" ? body.homonym.ambiguous : null,
   };
   });
 }

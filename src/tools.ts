@@ -29,10 +29,9 @@ const MAX_PRODUCTS = 25;
 // Noms de ciutat que existeixen a diversos països (ES ↔ Amèrica Llatina, etc.). El geocoder de
 // Motion4Rent només coneix ciutats COBERTES, així que per aquests noms retorna només la ciutat
 // espanyola i assumiria Espanya en silenci. Si l'usuari no ha indicat país, cal CONFIRMAR-ho.
-// Clau NORMALITZADA (sense accents, minúscules — el que retorna normText). NOMÉS noms on la
-// confusió de país és REALMENT probable (l'altra ciutat és gran/coneguda). NO hi posem noms
-// com "Barcelona"/"Zaragoza" que gairebé sempre volen dir la ciutat espanyola (seria molest):
-// per a aquests, el resum ja indica el país igualment i l'usuari pot corregir.
+// FALLBACK d'homonímia (mentre l'API no retorni el bloc `homonym` de city_homonyms). Un cop
+// desplegats l'endpoint i la migració, la font autoritzada és l'API i aquest set es pot treure.
+// Clau NORMALITZADA (sense accents, minúscules). Noms on la confusió de país és REALMENT probable.
 const AMBIGUOUS_CITY_NAMES = new Set([
   "cordoba", "cordova", "valencia", "santiago", "guadalajara", "merida", "leon", "cartagena",
   "trujillo", "cuenca", "granada", "toledo", "salamanca", "valladolid", "santander", "medellin",
@@ -208,8 +207,9 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           : place.cityEn ?? place.cityEs ?? city;
 
         // Nom ambigu i l'usuari no ha dit país → hem ASSUMIT la ciutat coberta (normalment ES).
-        // Cal que el client ho confirmi (podria voler la Córdoba d'Argentina, etc.).
-        const confirmCountry = !country && AMBIGUOUS_CITY_NAMES.has(normText(city));
+        // Font autoritzada: el bloc `homonym` de l'API (city_homonyms). Si l'API encara no ho
+        // retorna (homonymAmbiguous == null), fem servir la llista local com a FALLBACK.
+        const confirmCountry = !country && (geo.homonymAmbiguous ?? AMBIGUOUS_CITY_NAMES.has(normText(city)));
 
         const bookingLink = buildResultsLink(config.webBaseUrl, {
           language: lang,
