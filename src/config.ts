@@ -29,6 +29,24 @@ export const config = {
   /** Rate-limit del /mcp públic (per IP): finestra i màxim de peticions. El bearer intern el salta. */
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000) || 60_000,
   rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 30) || 30,
+  /**
+   * OAuth 2.1 (Resource Server) — protecció publish-ready per al directori. AS = WorkOS AuthKit.
+   * Amb oauthEnabled=false el comportament és el d'ara (públic + rate-limit): rollout per fases.
+   * Quan és true, /mcp exigeix un JWT vàlid (o el bearer intern) i exposem la metadata RFC 9728.
+   */
+  oauthEnabled: (process.env.OAUTH_ENABLED ?? "").trim().toLowerCase() === "true",
+  /** Issuer de l'AS (WorkOS AuthKit), p. ex. https://<tenant>.authkit.app. */
+  oauthIssuer: (process.env.OAUTH_ISSUER ?? "").trim().replace(/\/+$/, ""),
+  /** JWKS de l'AS. Si buit, es derivarà de l'issuer (issuer + /oauth2/jwks o .well-known). */
+  oauthJwksUrl: (process.env.OAUTH_JWKS_URL ?? "").trim(),
+  /** Audience del token = URI canònica de l'MCP (RFC 8707). El RS només accepta tokens per a ell. */
+  oauthAudience: (process.env.OAUTH_AUDIENCE ?? "https://mcp.motion4rent.com/mcp").trim(),
+  /**
+   * Scope requerit (space-separated). BUIT per defecte: WorkOS AuthKit emet scopes OIDC estàndard
+   * (openid/profile/email/offline_access), no un scope custom → la garantia és l'audience binding.
+   * Només omple això si configures permisos/scopes propis a l'AS.
+   */
+  oauthScopes: (process.env.OAUTH_SCOPES ?? "").trim(),
   /** Base de l'API de motion4rent (endpoints públics /search, /ai/cities, /details). */
   apiBaseUrl: env("M4R_API_BASE_URL", "http://localhost:3000").replace(/\/+$/, ""),
   /** Base de la web pública per als deep-links. */

@@ -9,6 +9,7 @@ import express, { type Request, type Response } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { config } from "./config.js";
 import { registerTools } from "./tools.js";
 
@@ -64,26 +65,114 @@ setInterval(() => {
   for (const [ip, e] of rlHits) if (now >= e.resetAt) rlHits.delete(ip);
 }, 60_000).unref();
 
+// ---------------------------------------------------------------------------
+// OAuth 2.1 — Resource Server (AS = WorkOS AuthKit). Actiu amb config.oauthEnabled.
+// El servidor NO emet tokens: només valida el JWT (signatura via JWKS de l'AS, iss, exp, aud).
+// ---------------------------------------------------------------------------
+const OAUTH_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+
+/** URL pública de la metadata de recurs protegit (a l'arrel de l'origen de l'audience). */
+function resourceMetadataUrl(): string {
+  try {
+    return new URL(config.oauthAudience).origin + OAUTH_RESOURCE_METADATA_PATH;
+  } catch {
+    return OAUTH_RESOURCE_METADATA_PATH;
+  }
+}
+
+/** JWKS remot de l'AS (cache intern de claus per jose). Lazy. */
+let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+function getJwks() {
+  if (!_jwks) {
+    const url = config.oauthJwksUrl || `${config.oauthIssuer}/oauth2/jwks`;
+    _jwks = createRemoteJWKSet(new URL(url));
+  }
+  return _jwks;
+}
+
+function bearerToken(req: Request): string | null {
+  const m = (req.header("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : null;
+}
+
+/** Valida el JWT OAuth. "ok" | "unauthorized" | "insufficient_scope". */
+async function verifyOAuth(req: Request): Promise<"ok" | "unauthorized" | "insufficient_scope"> {
+  const token = bearerToken(req);
+  if (!token) return "unauthorized";
+  try {
+    const { payload } = await jwtVerify(token, getJwks(), {
+      issuer: config.oauthIssuer || undefined,
+      audience: config.oauthAudience || undefined,
+    });
+    const required = config.oauthScopes.split(/\s+/).filter(Boolean);
+    if (required.length) {
+      const raw =
+        typeof (payload as any).scope === "string"
+          ? (payload as any).scope
+          : Array.isArray((payload as any).scp)
+            ? (payload as any).scp.join(" ")
+            : "";
+      const granted = new Set(String(raw).split(/\s+/).filter(Boolean));
+      if (!required.every((s) => granted.has(s))) return "insufficient_scope";
+    }
+    return "ok";
+  } catch {
+    return "unauthorized";
+  }
+}
+
 async function runHttp(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (_req, res) => res.json({ ok: true, server: SERVER_INFO }));
 
+  // Metadata de recurs protegit (RFC 9728) — indica als clients on és l'AS per iniciar OAuth.
+  if (config.oauthEnabled) {
+    app.get(OAUTH_RESOURCE_METADATA_PATH, (_req, res) => {
+      res.json({
+        resource: config.oauthAudience,
+        authorization_servers: config.oauthIssuer ? [config.oauthIssuer] : [],
+        scopes_supported: config.oauthScopes.split(/\s+/).filter(Boolean),
+        bearer_methods_supported: ["header"],
+      });
+    });
+  }
+
   // Endpoint MCP (Streamable HTTP), stateless: servidor+transport nous per petició.
   app.post("/mcp", async (req: Request, res: Response) => {
-    // El bearer intern de confiança salta el control. Sense ell: mode privat → 401;
-    // mode públic (directori) → rate-limit per IP.
+    // 1) El bearer intern de confiança sempre passa (stdio/local, proves internes).
     if (!hasTrustedBearer(req)) {
-      if (config.requireAuth) {
-        res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null });
-        return;
-      }
-      const { ok, retryAfterSec } = rateLimit(clientIp(req), Date.now());
-      if (!ok) {
-        res.set("Retry-After", String(retryAfterSec));
-        res.status(429).json({ jsonrpc: "2.0", error: { code: -32029, message: "Too many requests" }, id: null });
-        return;
+      if (config.oauthEnabled) {
+        // 2) OAuth: cal un JWT vàlid emès per l'AS per a aquest recurs (aud).
+        const verdict = await verifyOAuth(req);
+        if (verdict === "unauthorized") {
+          const scopePart = config.oauthScopes ? `, scope="${config.oauthScopes}"` : "";
+          res.set("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl()}"${scopePart}`);
+          res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null });
+          return;
+        }
+        if (verdict === "insufficient_scope") {
+          res.set(
+            "WWW-Authenticate",
+            `Bearer error="insufficient_scope", scope="${config.oauthScopes}", resource_metadata="${resourceMetadataUrl()}"`,
+          );
+          res.status(403).json({ jsonrpc: "2.0", error: { code: -32002, message: "Insufficient scope" }, id: null });
+          return;
+        }
+        // verdict === "ok" → continua
+      } else {
+        // Sense OAuth: mode privat (bearer obligatori → 401) o públic (rate-limit per IP).
+        if (config.requireAuth) {
+          res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null });
+          return;
+        }
+        const { ok, retryAfterSec } = rateLimit(clientIp(req), Date.now());
+        if (!ok) {
+          res.set("Retry-After", String(retryAfterSec));
+          res.status(429).json({ jsonrpc: "2.0", error: { code: -32029, message: "Too many requests" }, id: null });
+          return;
+        }
       }
     }
     const server = buildServer();
@@ -110,7 +199,11 @@ async function runHttp(): Promise<void> {
   app.delete("/mcp", methodNotAllowed);
 
   app.listen(config.port, () => {
-    const mode = config.requireAuth ? "privat (bearer obligatori)" : `públic (rate-limit ${config.rateLimitMax}/${Math.round(config.rateLimitWindowMs / 1000)}s)`;
+    const mode = config.oauthEnabled
+      ? `OAuth (AS=${config.oauthIssuer || "?"}, aud=${config.oauthAudience})`
+      : config.requireAuth
+        ? "privat (bearer obligatori)"
+        : `públic (rate-limit ${config.rateLimitMax}/${Math.round(config.rateLimitWindowMs / 1000)}s)`;
     console.error(`[motion4rent-mcp] HTTP actiu a :${config.port}/mcp  API=${config.apiBaseUrl}  mode=${mode}  bearer-intern=${config.authToken ? "on" : "off"}`);
   });
 }

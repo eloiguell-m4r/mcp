@@ -15,8 +15,10 @@ si fos un MCP local.
 > obligatori. Per tant el `--header Authorization: Bearer …` del JSON **ja no és imprescindible**
 > perquè funcioni — però **el mantenim** perquè el bearer actua de **bypass del rate-limit**
 > (si no, Claude Desktop podria quedar limitat en ús intensiu). El JSON de sota **no canvia**.
-> Quan implementem OAuth (opció B), aleshores sí que es podrà afegir directament per la UI de
-> Connectors, sense `mcp-remote` ni bearer.
+> OAuth (WorkOS AuthKit) **ja està implementat al codi** darrere el toggle `OAUTH_ENABLED` (RS +
+> `/.well-known/oauth-protected-resource` + validació JWT). Quan s'activi a producció
+> (`OAUTH_ENABLED=true` + config WorkOS), el connector s'afegirà **directament per la UI de
+> Connectors (OAuth)**, sense `mcp-remote` ni bearer (aquest mètode queda com a fallback intern).
 
 ## Fitxer de configuració
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`

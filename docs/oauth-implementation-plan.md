@@ -1,5 +1,17 @@
 # Pla per implementar OAuth al connector MCP
 
+> ✅ **ESTAT (2026-07): decidit OAuth amb WorkOS AuthKit i capa RS implementada al codi.**
+> Investigació posterior: per publicar al directori un recurs protegit (tenim `create_booking`
+> amb escriptura + PII), Anthropic exigeix **OAuth 2.0 amb consentiment**; tokens estàtics /
+> API key / query params NO s'accepten. Per tant es va escollir OAuth (AS = **WorkOS AuthKit**,
+> gratis ≤1M MAU, MCP-native). Fet al codi (`src/server.ts`, `src/config.ts`, dep `jose`):
+> endpoint `GET /.well-known/oauth-protected-resource`, validació JWT (JWKS + iss + exp + `aud`),
+> `401`/`403` amb `WWW-Authenticate`, tot **darrere el toggle `OAUTH_ENABLED`** (default false →
+> comportament actual intacte). **Pendent (manual):** configurar WorkOS (redirect
+> `https://claude.ai/api/mcp/auth_callback`, DCR, resource/audience, scope `mcp:use`), posar
+> `OAUTH_ISSUER`/`OAUTH_JWKS_URL`/`OAUTH_AUDIENCE` al `.env` de prod i activar `OAUTH_ENABLED=true`.
+> Pla operatiu complet: fitxer de pla de la sessió (`warm-exploring-cosmos.md`).
+
 > ⚠️ **OAuth NO és obligatori per al directori.** El formulari d'alta accepta autenticació
 > **OAuth / personalitzada / cap (none)**, i el nostre connector no té comptes ni dades per
 > usuari → es pot publicar **públic ("none")** (vegeu `docs/publicar-directori-claude.md`,

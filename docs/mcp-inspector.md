@@ -84,6 +84,11 @@ npx @modelcontextprotocol/inspector
     Si el camp és específic de "Bearer Token", posa-hi només el token (ell hi afegeix `Bearer `).
 - Prem **Connect**.
 
+> **Si el servidor corre amb `OAUTH_ENABLED=true`** (mode publish-ready): NO posis el bearer.
+> L'Inspector, en rebre el `401` amb `WWW-Authenticate`, descobreix l'AS via
+> `/.well-known/oauth-protected-resource` i **inicia el flux OAuth** (login WorkOS + consentiment)
+> automàticament. El bearer estàtic només és per al mode intern (sense OAuth).
+
 > Comprovació ràpida que el servidor respon abans de connectar:
 > `curl https://mcp.motion4rent.com/health` → `{ "ok": true, … }`.
 
