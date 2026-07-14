@@ -28,10 +28,14 @@ curl -s https://<domini>/.well-known/oauth-authorization-server | python3 -m jso
 Hi han de sortir `authorization_endpoint`, `token_endpoint`, `jwks_uri` i, després del pas 2,
 `client_id_metadata_document_supported: true` i/o un `registration_endpoint`.
 
-## 1) Activar login
-A **Authentication → AuthKit**, assegura't que hi ha almenys un mètode de login actiu
-(email/password o social). Els "usuaris" seran qui afegeixi el connector (clients finals);
-no cal cap dada nostra.
+## 1) Activar login (Authentication → Methods)
+Cal **almenys un mètode de login de CONSUMIDOR** actiu. Els "usuaris" seran qui afegeixi el
+connector (clients finals); no cal cap dada nostra.
+- ✅ **Email + Password** o **Magic Auth**: els més senzills, sense configuració externa.
+- **Social (Google…)**: a **staging** funciona amb les claus compartides de WorkOS; a **producció**
+  cal posar-hi les **teves pròpies credencials OAuth** (p. ex. crear una app a Google Cloud).
+- ❌ **NO activis "Single Sign-On"**: és per a IdPs empresarials (Okta/Entra) i demana redirect URIs;
+  no és per a aquest connector. (El registre del client Claude el fan CIMD/DCR, sense redirect URIs.)
 
 ## 2) Activar registre de clients MCP (menú **Connect → Configuration → MCP Auth**)
 ⚠️ Aquests toggles NO són a "Authentication": són al producte **Connect** (menú esquerre) →
