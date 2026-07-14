@@ -9,7 +9,7 @@ import express, { type Request, type Response } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, jwtVerify, decodeJwt } from "jose";
 import { config } from "./config.js";
 import { registerTools } from "./tools.js";
 
@@ -116,13 +116,45 @@ async function verifyOAuth(req: Request): Promise<"ok" | "unauthorized" | "insuf
       if (!required.every((s) => granted.has(s))) return "insufficient_scope";
     }
     return "ok";
-  } catch {
+  } catch (err) {
+    // Log del motiu real (aud/iss/exp/signatura) per depurar sense exposar res al client.
+    try {
+      const c = decodeJwt(token);
+      console.error(
+        `[motion4rent-mcp] OAuth JWT rebutjat: ${(err as any)?.code || (err as Error)?.message} | ` +
+          `token iss=${c.iss} aud=${JSON.stringify(c.aud)} exp=${c.exp} | ` +
+          `esperat iss=${config.oauthIssuer} aud=${config.oauthAudience}`,
+      );
+    } catch {
+      console.error("[motion4rent-mcp] OAuth JWT rebutjat (no descodificable):", (err as Error)?.message);
+    }
     return "unauthorized";
   }
 }
 
 async function runHttp(): Promise<void> {
   const app = express();
+
+  // CORS: els clients MCP basats en navegador (MCP Inspector, claude.ai) fan fetch directe;
+  // sense CORS el navegador bloqueja les crides ("failed to fetch") i el flux OAuth. Cal també
+  // exposar WWW-Authenticate (el client el llegeix del 401 per descobrir l'AS) i respondre el preflight.
+  app.use((req: Request, res: Response, next) => {
+    res.header("Access-Control-Allow-Origin", req.header("origin") ?? "*");
+    res.header("Vary", "Origin");
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID",
+    );
+    res.header("Access-Control-Expose-Headers", "WWW-Authenticate, Mcp-Session-Id");
+    res.header("Access-Control-Max-Age", "86400");
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (_req, res) => res.json({ ok: true, server: SERVER_INFO }));
