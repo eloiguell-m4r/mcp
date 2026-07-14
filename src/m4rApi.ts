@@ -351,7 +351,14 @@ export function productImageUrl(
 ): string | null {
   const f = (filename ?? "").trim();
   if (f === "") return null;
-  const clean = f.replace(/^\/+/, "");
+  // Els filenames poden tenir espais o caràcters especials (p. ex. "Jiangxi 11 268415.png"):
+  // cal codificar-los per segment (espai → %20) o la URL és invàlida i el client no la carrega.
+  // Codifiquem per segment per preservar les "/" (la BD guarda el nom cru, sense codificar).
+  const clean = f
+    .replace(/^\/+/, "")
+    .split("/")
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
   let b = base;
   if (width && /\/w\d+$/.test(b)) {
     b = b.replace(/\/w\d+$/, `/w${width}`);

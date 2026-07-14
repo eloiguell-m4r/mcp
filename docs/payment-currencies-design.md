@@ -132,9 +132,24 @@ Ordre de desplegament (compatible cap enrere en cada pas):
 
 Manteniment: afegir/treure/activar una moneda = `INSERT/UPDATE` a `payment_currencies` (sense desplegar codi).
 
-## F2/F3 (pendents, opcionals)
-- **F2**: el web deixa de hardcodejar `$_currencyOrder`/`$_liLabels`/decimals i llegeix la taula.
-- **F3**: moure `currencyForCountry` (país→moneda per defecte) a dades.
+## F2 — IMPLEMENTAT (web deixa el hardcode)
+
+Fitxers (`motion4rent-web`):
+- **`module/Application/src/View/Helper/PaymentCurrencies.php`** (nou) — view helper que crida
+  `GET /exchange/payment-currencies` via `CallApi` (**cache Redis 1h**, memo per-request) i retorna
+  `['order'=>[...], 'labels'=>['EUR'=>'€ EUR',...], 'decimals'=>[...]]`. Fallback a les 5 si l'API falla.
+- **`module/Application/config/module.config.php`** — registrat a `view_helpers` (factory + alias `paymentCurrencies`).
+- **`view/layout/layout.phtml`** i **`view/layout/checkout.phtml`** — s'han substituït els
+  `$_currencyOrder = [...]` i `$_liLabels = [...]` hardcodejats per `$this->paymentCurrencies()['order']`
+  / `['labels']`. La lògica de reordre per `$_optimalCurrency` es manté.
+
+Notes:
+- Segur de desplegar sol: amb el fallback, el web mostra les 5 encara que l'endpoint no hi sigui.
+- `symbolCurrency` (icones SVG) i `CurrencyHelper::currencyForCountry` (país→moneda per defecte) NO
+  s'han tocat: són presentació / F3.
+
+## F3 (pendent, opcional)
+- Moure `currencyForCountry` (país→moneda per defecte) a dades (columna/taula) si es vol centralitzar també això.
 
 ## Relacionat
 - Patró equivalent: `docs/coverage-endpoint-design.md` (city_homonyms).
