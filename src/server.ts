@@ -100,10 +100,13 @@ async function verifyOAuth(req: Request): Promise<"ok" | "unauthorized" | "insuf
   const token = bearerToken(req);
   if (!token) return "unauthorized";
   try {
-    const { payload } = await jwtVerify(token, getJwks(), {
+    const verifyOpts: { issuer?: string; audience?: string } = {
       issuer: config.oauthIssuer || undefined,
-      audience: config.oauthAudience || undefined,
-    });
+    };
+    if (config.oauthRequireAudience && config.oauthAudience) {
+      verifyOpts.audience = config.oauthAudience; // enforce aud (RFC 8707) tret que es desactivi
+    }
+    const { payload } = await jwtVerify(token, getJwks(), verifyOpts);
     const required = config.oauthScopes.split(/\s+/).filter(Boolean);
     if (required.length) {
       const raw =

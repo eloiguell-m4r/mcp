@@ -42,6 +42,13 @@ export const config = {
   /** Audience del token = URI canònica de l'MCP (RFC 8707). El RS només accepta tokens per a ell. */
   oauthAudience: (process.env.OAUTH_AUDIENCE ?? "https://mcp.motion4rent.com/mcp").trim(),
   /**
+   * Exigir que el `aud` del token sigui exactament oauthAudience (RFC 8707). Default true.
+   * Posa-ho a false com a xarxa de seguretat si l'AS/client no lliga el `aud` al recurs (p. ex.
+   * WorkOS torna aud=client_id perquè el client no envia `resource`): aleshores es valida només
+   * signatura + iss + exp (segur si l'AS és dedicat a aquest connector, com és el cas).
+   */
+  oauthRequireAudience: (process.env.OAUTH_REQUIRE_AUDIENCE ?? "true").trim().toLowerCase() !== "false",
+  /**
    * Scope requerit (space-separated). BUIT per defecte: WorkOS AuthKit emet scopes OIDC estàndard
    * (openid/profile/email/offline_access), no un scope custom → la garantia és l'audience binding.
    * Només omple això si configures permisos/scopes propis a l'AS.
