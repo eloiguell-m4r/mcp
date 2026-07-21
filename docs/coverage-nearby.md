@@ -14,7 +14,8 @@ Resposta: `{ origin:{lat,lon}, radius_km, count, places:[{country, city_en, city
 - Distància amb `ST_Distance_Sphere` (mateixa fórmula que el buscador de prod).
 - ⚠️ **Convenció: `c0(_city)`=LATITUD, `c1(_city)`=LONGITUD** — confirmat a `routes/search.js` (`POINT(c1_city, c0_city), POINT(lon, lat)`). El haversine de `/landings_nearby_places` té c0/c1 intercanviats (bug) → **no s'ha replicat**.
 - Cobertura = `stores.status=1` o `stores_virtual.deleted_at IS NULL` (igual que `/ai/cities`).
-- Dedup per país+ciutat, distància mínima, compta botigues, ordena i talla a `limit`.
+- Dedup per país+ciutat, distància mínima, ordena i talla a `limit`.
+- `stores` = **botigues DISTINTES** (`stores.id` física ∪ `stores_virtual.id_store` virtual), **no** files. ⚠️ `stores_virtual` té una fila per producte (mateix `id_store`) → cal `GROUP BY id_store` a la query virtual + `Set` de `store_id` al dedup, si no una botiga amb N productes surt com N botigues (bug detectat: Petershagen 8 productes → deia "8 botigues").
 
 ### webs/mcp
 - `src/m4rApi.ts`: `nearbyCitiesWithCoverage(apiBase, lat, lon, {country,radius,limit})` (no cachejat) i `listCoverageCities(apiBase, {country})` (reutilitza `/statics/city-slug-map`, cachejat 30 min).
