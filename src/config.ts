@@ -35,8 +35,17 @@ export const config = {
    * Quan és true, /mcp exigeix un JWT vàlid (o el bearer intern) i exposem la metadata RFC 9728.
    */
   oauthEnabled: (process.env.OAUTH_ENABLED ?? "").trim().toLowerCase() === "true",
-  /** Issuer de l'AS (WorkOS AuthKit), p. ex. https://<tenant>.authkit.app. */
-  oauthIssuer: (process.env.OAUTH_ISSUER ?? "").trim().replace(/\/+$/, ""),
+  /**
+   * Issuer de l'AS (WorkOS AuthKit), p. ex. https://<tenant>.authkit.app. Es NORMALITZA a https://
+   * (s'afegeix l'esquema si falta i http→https) perquè ha de coincidir EXACTAMENT amb el `iss` del
+   * token (que és https); un http:// aquí provoca 401 "after successful authentication".
+   */
+  oauthIssuer: (() => {
+    let v = (process.env.OAUTH_ISSUER ?? "").trim().replace(/\/+$/, "");
+    if (!v) return "";
+    if (!/^https?:\/\//i.test(v)) v = "https://" + v;
+    return v.replace(/^http:\/\//i, "https://");
+  })(),
   /** JWKS de l'AS. Si buit, es derivarà de l'issuer (issuer + /oauth2/jwks o .well-known). */
   oauthJwksUrl: (process.env.OAUTH_JWKS_URL ?? "").trim(),
   /** Audience del token = URI canònica de l'MCP (RFC 8707). El RS només accepta tokens per a ell. */
