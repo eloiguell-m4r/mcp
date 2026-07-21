@@ -4,27 +4,31 @@ Guió per provar **totes les tools** i **tot el que revisaran** Anthropic/OpenAI
 problemes abans d'enviar. Fes-ho contra **producció** (`https://mcp.motion4rent.com/mcp`).
 
 ## Com provar (tria una)
-- **Claude Desktop** (ja connectat via `mcp-remote` + bearer) — el més realista.
-- **MCP Inspector** contra prod: `npx @modelcontextprotocol/inspector` → Transport *Streamable HTTP*,
-  URL `https://mcp.motion4rent.com/mcp`, header `Authorization: Bearer <MCP_AUTH_TOKEN>`
-  (el bearer salta el rate-limit). Veus la resposta JSON crua de cada tool. Vegeu `docs/mcp-inspector.md`.
 
-⚠️ Producció usa Stripe **LIVE**: pots cridar `create_booking` (només torna l'enllaç, no cobra),
-però **no paguis** i fes-ho **només amb l'Invacare Leo** de Sevilla (vegeu més avall).
+- **Claude Desktop / claude.ai** afegint el connector per **OAuth** (login WorkOS) — el més realista
+  (és exactament el que farà un usuari/revisor). El bearer intern (`mcp-remote --header`) també val, com a bypass.
+- **MCP Inspector** contra prod: `npx @modelcontextprotocol/inspector@latest` → Transport _Streamable HTTP_,
+  URL `https://mcp.motion4rent.com/mcp`. **Sense header** → fa el flux OAuth; o amb `Authorization: Bearer
+  <MCP_AUTH_TOKEN>` per saltar-lo. Veus la resposta JSON crua de cada tool. Vegeu `docs/mcp-inspector.md`.
+
+⚠️ Producció usa Stripe **LIVE**. `create_booking` **NO cobra**: només torna l'enllaç Stripe i crea
+un _hold_ (avís intern per a M4R; **cap proveïdor notificat**). Pots provar-lo amb **qualsevol
+producte**; l'únic que no has de fer és **completar el pagament** de l'enllaç (això sí que seria un
+càrrec real).
 
 ---
 
 ## Part 1 — Provar cada tool (7)
 
-| # | Tool | Prompt / crida | Què has de veure (OK) |
-|---|------|----------------|------------------------|
-| 1 | `check_city_coverage` | "Do you operate in Barcelona?" | Confirma cobertura; si és homònima (p. ex. "Valencia" ES/VE) demana el país. |
-| 2 | `search_mobility_rentals` | "Electric wheelchairs in Valencia, 14–15 Aug, pickup/return 10:00" | ~15 resultats **del tipus**, cada un amb **model real** (Librecar Mistral…), specs (pes màx, autonomia, plegable, tipus), **preu final**, foto, `delivery_options`, cancel·lació gratuïta. |
-| 3 | `get_rental_details` | "Full details of the first one" | Preu = mateix que la cerca; dipòsit; `delivery_options` correctes; foto; `map_url` (sense nom de botiga); specs. |
-| 4 | `list_product_options` | "Any add-ons/extras for that product?" | Llista d'extres amb preu (o buida sense error). |
-| 5 | `list_currencies` | "Which currencies can I see prices in?" | Llista de monedes actives del web. |
-| 6 | `mobility_policies` (FAQ) | "What is the cancellation policy? And the deposit?" | Resposta de política/FAQ coherent. |
-| 7 | `create_booking` | **NOMÉS Invacare Leo** (vegeu Part 3) | Torna `urlTpv` (Stripe). Reserva en *hold*, **no cobra**. |
+| #   | Tool                      | Prompt / crida                                                     | Què has de veure (OK)                                                                                                                                                                      |
+| --- | ------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `check_city_coverage`     | "Do you operate in Barcelona?"                                     | Confirma cobertura; si és homònima (p. ex. "Valencia" ES/VE) demana el país.                                                                                                               |
+| 2   | `search_mobility_rentals` | "Electric wheelchairs in Valencia, 14–15 Aug, pickup/return 10:00" | ~15 resultats **del tipus**, cada un amb **model real** (Librecar Mistral…), specs (pes màx, autonomia, plegable, tipus), **preu final**, foto, `delivery_options`, cancel·lació gratuïta. |
+| 3   | `get_rental_details`      | "Full details of the first one"                                    | Preu = mateix que la cerca; dipòsit; `delivery_options` correctes; foto; `map_url` (sense nom de botiga); specs.                                                                           |
+| 4   | `list_product_options`    | "Any add-ons/extras for that product?"                             | Llista d'extres amb preu (o buida sense error).                                                                                                                                            |
+| 5   | `list_currencies`         | "Which currencies can I see prices in?"                            | Llista de monedes actives del web.                                                                                                                                                         |
+| 6   | `mobility_policies` (FAQ) | "What is the cancellation policy? And the deposit?"                | Resposta de política/FAQ coherent.                                                                                                                                                         |
+| 7   | `create_booking`          | "Book it for John Tester, john@example.com, +34600000000, ES"     | Torna `urlTpv` (Stripe). Reserva en _hold_ (avís intern, **no notifica ni cobra**). NO completis el pagament.                                                                              |
 
 Prova també **moneda** ("show prices in USD") i **filtre per tipus** ("only scooters in Valencia").
 
@@ -35,7 +39,7 @@ Prova també **moneda** ("show prices in USD") i **filtre per tipus** ("only sco
 - [ ] **Cada tool funciona** i no peta / no penja (proven totes, fins i tot amb dades mínimes).
 - [ ] **Anotacions correctes**: les de lectura marcades `readOnlyHint`; `create_booking` com a
       escriptura (no destructiva). (A `tools.ts`; es veuen a `tools/list` a l'Inspector.)
-- [ ] **Auth**: `/mcp` públic (o el que declaris al formulari) + **rate-limit** actiu.
+- [ ] **Auth**: `/mcp` protegit amb **OAuth** (sense token vàlid → `401` + `WWW-Authenticate`); rate-limit com a backstop.
 - [ ] **Política de privadesa** accessible (`/privacy`) i amb la secció del connector d'IA
       (què recollim, Stripe, retenció).
 - [ ] **Descripcions exactes**: el que diu la tool = el que fa (res enganyós ni "from/approx").
@@ -62,23 +66,26 @@ Prova també **moneda** ("show prices in USD") i **filtre per tipus** ("only sco
 - [ ] **Festiu (`closed_service`)**: el preu amb recollida/entrega en dia festiu inclou el recàrrec
       (p. ex. l'exemple 14–15 Ago València: 104 €, no 84 €).
 - [ ] **Moneda**: demanar USD → preus convertits; el dipòsit es manté en la moneda del proveïdor.
-- [ ] **Reserva de prova (Sevilla, divendres 23:00→23:00):**
-  - Cerca "mobility scooters in Seville for Friday <divendres futur>, pickup/return 23:00".
-  - **`create_booking` NOMÉS del "Invacare Leo" (id 8621)** → torna `urlTpv`. **NO paguis.**
-  - ⚠️ **NO reservis** el "Manual wheelchair" (id 559) ni cap altre → seria reserva REAL.
+- [ ] **Reserva de prova (qualsevol producte disponible)**: `create_booking` → torna `urlTpv` (Stripe)
+      i crea un _hold_ (avís intern, **no notifica cap proveïdor ni cobra**). **NO completis el pagament**
+      de l'enllaç (prod = Stripe LIVE → seria càrrec real). Sense restricció de ciutat/producte.
+  - _(Opcional)_ si vols provar el **flux de pagament** de veritat sense afectar un partner real, fes-ho
+    amb el producte de test **Invacare Leo** (Sevilla, supplier de test) — vegeu memòria/`fase-3a`.
 - [ ] **Rate-limit** (sense bearer): >30 peticions/min per IP → `429`.
 
 ---
 
 ## Resultat
+
 Anota aquí què falla per corregir-ho abans d'enviar:
 
-| Prova | OK / KO | Nota |
-|-------|---------|------|
-| Tools 1–7 | | |
-| Compliment (Part 2) | | |
-| Casos límit (Part 3) | | |
+| Prova                | OK / KO | Nota |
+| -------------------- | ------- | ---- |
+| Tools 1–7            |         |      |
+| Compliment (Part 2)  |         |      |
+| Casos límit (Part 3) |         |      |
 
 ## Relacionats
+
 - `docs/listing-directori.md` (textos + instruccions de prova per als revisors, en anglès)
 - `docs/publicar-directori-claude.md` · `docs/publicar-chatgpt.md` · `docs/mcp-inspector.md`

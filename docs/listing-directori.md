@@ -54,6 +54,8 @@ processa **Stripe** (no rebem ni guardem dades de targeta).
 - Contacte: `info@motion4rent.com`
 - Política de privadesa: `https://www.motion4rent.com/privacy` (inclou la secció del connector d'IA)
 - Adreça: Passeig Gallifa 1, 08250 Sant Joan de Vilatorrada (Barcelona), Espanya
+- **Icona** (quadrada 512×512, de marca amb el símbol de cadira de rodes): `https://www.motion4rent.com/favicon-512x512.png`
+  (NO usar `logo-c1.png`: és un wordmark horitzontal 285×74, no serveix d'icona. Opcional futur: versió simplificada només-símbol per a més nitidesa a mida petita.)
 
 ## Connexió (dades tècniques)
 - URL MCP: `https://mcp.motion4rent.com/mcp`
@@ -64,33 +66,22 @@ processa **Stripe** (no rebem ni guardem dades de targeta).
 
 ### ▶ PER ENGANXAR AL FORMULARI (anglès)
 ```
-No account or login is required — this is a public connector.
+No login is required to browse — this is a public connector (OAuth is used when adding it
+via the directory). You can exercise ALL tools freely with ANY city or product; there are
+no side effects and no one is charged.
 
-IMPORTANT — which product to book: the booking test must be done ONLY with the
-"Invacare Leo" mobility scooter in Seville, which belongs to our test store. The
-Seville search also returns a "Manual wheelchair" from a REAL partner store — do NOT
-book that one, as it would create a real reservation. Never book "the first result".
+Suggested walkthrough:
+1) Search — "Electric wheelchairs in Valencia from 2026-08-14 to 2026-08-15, pickup and
+   return at 10:00." Returns products with the final price (taxes and fee included), photo,
+   specs, delivery options and extras.
+2) Details — "Show full details of the first one." Deposit, delivery options, extras, photo.
+3) Booking (optional) — "Book it for John Tester, john@example.com, +34600000000, Spain."
+   create_booking returns a Stripe PAYMENT LINK (urlTpv). It NEVER charges anyone: the
+   booking stays an unpaid hold (an internal note on our side only — no third party is
+   notified and no money moves unless the link is opened and paid). Just ignore the link.
 
-Test window: any Friday, with pickup and return at 23:00 (this time window makes
-Seville show availability even outside opening hours). Example: Friday 2026-07-24
-(use any future Friday).
-
-1) Discovery — Prompt: "Search mobility scooters in Seville for Friday 2026-07-24,
-   pickup and return at 23:00." Returns products with the final price (taxes and
-   management fee included), photo, specs and delivery options.
-2) Details — Prompt: "Show full details of the Invacare Leo mobility scooter."
-   Returns deposit, delivery options and extras.
-3) Booking (Invacare Leo ONLY) — Prompt: "Book the Invacare Leo mobility scooter for
-   John Tester, john@example.com, +34600000000, Spain." create_booking returns a
-   secure Stripe payment link (urlTpv). The booking is created as an UNPAID HOLD and
-   NO charge occurs unless the link is opened and paid — you can ignore it or let it
-   expire.
-
-Other read-only tools you can exercise safely:
-- check_city_coverage: "Do you operate in Barcelona?"
-- list_currencies: "Which currencies can I see prices in?"
-- list_product_options / get_rental_details on any product.
-- Policies & FAQ: "What is the cancellation policy?"
+Other tools: check_city_coverage ("Do you operate in Barcelona?"), list_currencies,
+list_product_options, Policies & FAQ ("What is the cancellation policy?").
 ```
 
 ### Notes internes (no enganxar)

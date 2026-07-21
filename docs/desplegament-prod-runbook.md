@@ -25,12 +25,15 @@ Dos repos, dos mecanismes:
 - ✅ vhost públic `mcp.motion4rent.com` (proxy nginx → :8787) + DNS **A record** proxied.
 - ✅ Tenants: `:3000` motion4rent-api, `:3001` rent4riders-api.
 - ✅ **Cloudflare WAF Custom Rule "Skip"** per `http.host eq mcp.motion4rent.com` (Super Bot Fight Mode + Browser Integrity + Security Level + Managed rules) → sense el "Just a moment…".
-- ✅ **Cloudflare Configuration Rule** SSL=**Flexible** per `mcp.motion4rent.com` (l'origen només té :80; sense això → error 521). NO túnel.
-- ✅ **Verificat des de fora**: `https://mcp.motion4rent.com/health` → 200 JSON; `POST /mcp` sense token → 401.
-- ⏳ Verificar tools (create_booking) via MCP Inspector HTTP + bearer, i **registrar el connector** a Claude/ChatGPT (secció 7).
-- ⏳ Reserva real de prova (Sevilla, supplier id=1, divendres 23-23h) — encara Stripe TEST — abans de passar a LIVE (secció 8).
-
-> Nota seguretat: SSL Flexible deixa el tram Cloudflare→origen (:80) sense xifrar (hi passa el bearer). Per endurir-ho més endavant: Cloudflare Tunnel o Origin Certificate al host + tornar a Full.
+- ✅ **Cloudflare Configuration Rule** SSL=**Full (strict)** per `mcp.motion4rent.com` (endurit 2026-07):
+  Origin Certificate de Cloudflare instal·lat a l'origen (`/etc/ssl/cloudflare/mcp.pem` + `mcp.key`),
+  nginx amb bloc **`:443 ssl`** (proxy a `127.0.0.1:8787`). Abans era Flexible (:80 en clar) — ja NO. NO túnel.
+- ✅ **Lockdown d'origen**: Security Group obre el **:443 només als rangs de Cloudflare** via managed prefix
+  list `cloudflare-ipv4` (baixada de `cloudflare.com/ips-v4`). Regla `0.0.0.0/0:443` retirada.
+- ✅ **OAuth 2.1** (WorkOS AuthKit) actiu com a auth del directori (`OAUTH_ENABLED=true`); el bearer estàtic
+  queda com a bypass intern. Vegeu `docs/workos-authkit-setup.md` i `docs/oauth-implementation-plan.md`.
+- ✅ **Verificat des de fora**: `https://mcp.motion4rent.com/health` → 200 JSON; `POST /mcp` sense token → 401 + WWW-Authenticate.
+- ⏳ Preparar textos del listing + compte/guió de prova i **enviar al directori** (`docs/publicar-directori-claude.md`).
 
 ## 0) Prerequisits al host de Virgínia
 - **Node 22+**: `node -v` (el server demana >=20; recomanat 22).
@@ -148,6 +151,35 @@ Enfocament escollit (reutilitza la infra Cloudflare→nginx existent, sense inst
 2. **DNS Cloudflare**: registre **A** `mcp` → IP pública del host, **Proxied**. (S'ha fet com a A directe a aquest host, no CNAME a l'ELB: el CNAME a l'ELB repartiria entre hosts i el MCP només corre en aquest.)
 
 Estat: l'encaminament funciona (la petició arriba a nginx→MCP). **Alternativa descartada:** Cloudflare Tunnel (`cloudflared`) — més net si el host no té IP pública, però aquí l'A record ja arriba.
+
+### 5b) SSL Full (strict) — xifrat CF→origen (endurit 2026-07)
+Abans era SSL=Flexible (CF→origen pel :80 en clar). Ara Full (strict) amb Origin Certificate:
+1. **Cloudflare → SSL/TLS → Origin Server → Create Certificate** (hostnames `mcp.motion4rent.com`). Copiar cert + clau.
+2. **A l'origen**: desar `/etc/ssl/cloudflare/mcp.pem` i `mcp.key` (`chmod 600` la clau) i afegir un segon `server{}` a `mcp-public.conf`:
+   ```nginx
+   server {
+       listen 443 ssl;
+       server_name mcp.motion4rent.com;
+       ssl_certificate     /etc/ssl/cloudflare/mcp.pem;
+       ssl_certificate_key /etc/ssl/cloudflare/mcp.key;
+       location / { proxy_pass http://127.0.0.1:8787; proxy_http_version 1.1; proxy_buffering off;
+           proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme; proxy_read_timeout 300s; }
+   }
+   ```
+   `sudo nginx -t && sudo systemctl reload nginx`. Prova local:
+   `curl -k --resolve mcp.motion4rent.com:443:127.0.0.1 https://mcp.motion4rent.com/health`.
+3. **Security Group**: obrir `:443` NOMÉS als rangs de Cloudflare via managed prefix list (CloudShell):
+   ```bash
+   mapfile -t C < <(curl -s https://www.cloudflare.com/ips-v4)
+   E=(); for c in "${C[@]}"; do E+=("Cidr=$c,Description=cloudflare"); done
+   aws ec2 create-managed-prefix-list --prefix-list-name cloudflare-ipv4 --address-family IPv4 \
+     --max-entries $(( ${#C[@]} + 5 )) --entries "${E[@]}" --region us-east-1
+   # → PrefixListId; després authorize-security-group-ingress tcp/443 amb PrefixListIds=[{PrefixListId=...}]
+   ```
+   Retirar la regla `0.0.0.0/0:443` si existia.
+4. **Cloudflare → Configuration Rule** de `mcp.motion4rent.com` → SSL = **Strict** (= Full strict). Verificar
+   `curl -s https://mcp.motion4rent.com/health` → `{ok:true}` sense 521/526.
 
 ## 6) ⚠️ PENDENT — eximir mcp.motion4rent.com del repte de bots de Cloudflare
 `curl https://mcp.motion4rent.com/health` retorna el *managed challenge* "Just a moment…" (`cType: managed`) → els clients de Claude/ChatGPT (servidor-a-servidor) el rebrien i el connector fallaria. Cal una regla que salti el repte per a aquest subdomini (l'auth real ja és el `MCP_AUTH_TOKEN`):
