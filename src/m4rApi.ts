@@ -112,6 +112,84 @@ export async function geocodeCity(apiBase: string, city: string): Promise<Geocod
   });
 }
 
+// ---------------------------------------------------------------------------
+// COBERTURA: ciutats properes / llistat per país. Font única a l'API (reutilitzable
+// també pel projecte webs/ia): NO dupliquem la lògica de cobertura al client.
+// ---------------------------------------------------------------------------
+
+export interface NearbyCity {
+  country: string;
+  cityEn: string | null;
+  cityEs: string | null;
+  url: string; // slug de ciutat (url_en) → per construir deep-links
+  lat: string;
+  lon: string;
+  distanceKm: number | null;
+  stores: number; // nº de botigues (física + virtual) que serveixen la ciutat dins el radi
+}
+
+/**
+ * Ciutats amb cobertura MÉS PROPERES a unes coordenades (lat/lon que passa el caller, p. ex.
+ * la ciutat que ha dit l'usuari encara que NO tingui cobertura). Ordenades per distància.
+ * NO es cacheja: depèn de coords lliures (l'espai de claus és massa gran).
+ */
+export async function nearbyCitiesWithCoverage(
+  apiBase: string,
+  lat: number,
+  lon: number,
+  opts: { country?: string; radius?: number; limit?: number } = {},
+): Promise<NearbyCity[]> {
+  const q = new URLSearchParams({ lat: String(lat), lon: String(lon) });
+  if (opts.country) q.set("country", opts.country.toLowerCase());
+  if (opts.radius) q.set("radius", String(opts.radius));
+  if (opts.limit) q.set("limit", String(opts.limit));
+  const body = unwrapBody(await getJson(`${apiBase}/ai/cities/nearby?${q.toString()}`, DEFAULT_TIMEOUT_MS));
+  const rows: any[] = Array.isArray(body?.places) ? body.places : [];
+  return rows.map((p) => ({
+    country: String(p.country ?? "").toLowerCase(),
+    cityEn: p.city_en ?? null,
+    cityEs: p.city_es ?? null,
+    url: p.url ?? "",
+    lat: String(p.lat ?? ""),
+    lon: String(p.lon ?? ""),
+    distanceKm: p.distance_km != null ? Number(p.distance_km) : null,
+    stores: Number(p.stores ?? 0),
+  }));
+}
+
+export interface CoverageCity {
+  cityEn: string;
+  country: string;
+  slug: string; // slug canònic (url_en) per a deep-links
+}
+
+/**
+ * TOTES les ciutats amb cobertura, opcionalment filtrades per país. Reutilitza l'endpoint
+ * existent /statics/city-slug-map (city_en + country + slugs de totes les botigues actives).
+ * Catàleg gairebé estàtic → cachejat (TTL llarg).
+ */
+export async function listCoverageCities(
+  apiBase: string,
+  opts: { country?: string } = {},
+): Promise<CoverageCity[]> {
+  const list = await memo(`covcities:${apiBase}`, 30 * 60_000, async () => {
+    const body = unwrapBody(await getJson(`${apiBase}/statics/city-slug-map`, DEFAULT_TIMEOUT_MS));
+    const rows: any[] = Array.isArray(body) ? body : [];
+    return rows
+      .map((r) => ({
+        cityEn: String(r.city_en ?? "").trim(),
+        country: String(r.country ?? "").trim().toLowerCase(),
+        // El primer slug sol ser el canònic (url_en); fallback al slug de city_en.
+        slug: (Array.isArray(r.slugs) && r.slugs[0]) ? String(r.slugs[0]) : slugCiudad(String(r.city_en ?? "")),
+      }))
+      .filter((c) => c.cityEn);
+  });
+  const country = (opts.country ?? "").trim().toLowerCase();
+  const filtered = country ? list.filter((c) => c.country === country) : list;
+  // Ordre estable: per país i després per ciutat.
+  return [...filtered].sort((a, b) => a.country.localeCompare(b.country) || a.cityEn.localeCompare(b.cityEn));
+}
+
 export interface Producto {
   id_product_store: number | null;
   id_store: number | null;

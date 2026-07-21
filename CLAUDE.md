@@ -11,13 +11,15 @@ Tenant pilot: **motion4rent**. La maquinària és comuna i es replicarà a **ren
 ```
 Usuari a Claude/ChatGPT (ha afegit el connector)
    └─HTTPS JSON-RPC→ /mcp (aquest servidor, Node natiu)
-        ├─ LECTURA  → motion4rent-api  /ai/cities, /search/results, /details   (read-only)
+        ├─ LECTURA  → motion4rent-api  /ai/cities, /ai/cities/nearby, /statics/city-slug-map, /search/results, /details   (read-only)
         └─ deep-link→ web pública (WEB_BASE_URL)  → l'usuari completa i PAGA al web
 ```
 
 - **Transports:** `stdio` (dev) + **Streamable HTTP** stateless (`POST /mcp`, `GET /health`); auth bearer opcional (`MCP_AUTH_TOKEN`). Stateless → escalable horitzontalment.
 - **Tools (read-only, avui):**
-  - `check_city_coverage` — cobertura + desambiguació de país (homònimes).
+  - `check_city_coverage` — cobertura + desambiguació de país (homònimes). Si la ciutat NO té cobertura, remet a `find_nearby_cities_with_coverage`.
+  - `find_nearby_cities_with_coverage` — donada una ciutat (coberta o NO, p. ex. Hamburg), retorna les ciutats **cobertes més properes** (distància km + país + nº botigues). ⚠️ El **caller passa la lat/lon aproximada** de la ciutat (l'API no geocodifica ciutats sense cobertura). Crida `GET /ai/cities/nearby`. Reutilitzable pel projecte `webs/ia`.
+  - `list_coverage_cities` — llista de ciutats amb cobertura, opcionalment per país (per a "on opereu a Alemanya?"). Reutilitza `GET /statics/city-slug-map` (endpoint existent). Sense preus/disponibilitat.
   - `search_mobility_rentals` — ciutat+dates → productes amb preu + `booking_link` (deep-link a resultats amb `start/end/lat/lon/name/url` + hash `#typeProd:`).
   - `get_rental_details` — detall normalitzat d'un producte (`/details`).
   - `mobility_policies` — FAQ/polítiques (dataset curat, text ES verbatim del corpus RAG de `webs/ia`; param `language` → el client tradueix).
@@ -47,11 +49,13 @@ Usuari a Claude/ChatGPT (ha afegit el connector)
 ## Fitxers
 - `src/config.ts` — env: `MCP_TRANSPORT`, `PORT`, `MCP_AUTH_TOKEN`, `M4R_API_BASE_URL`, `WEB_BASE_URL`, `TENANT`, `PRODUCT_IMAGE_BASE`, i (Fase 3A) `M4R_CHECKOUT_BASE_URL` + `M4R_CHECKOUT_SECRET`.
 - `src/deeplink.ts` — contracte d'URL del web (slugs per idioma + query + `#typeProd:`). Rèplica del que fan `webs/ia` i `cron/sitemap.php`.
-- `src/m4rApi.ts` — client HTTP (`geocodeCity`, `searchResults`, `getDetails`+`normalizeDetails`). Timeouts: SEARCH/DETAILS 25 s, default 8 s.
-- `src/tools.ts` — registre de les 4 tools.
+- `src/m4rApi.ts` — client HTTP (`geocodeCity`, `nearbyCitiesWithCoverage`, `listCoverageCities`, `searchResults`, `getDetails`+`normalizeDetails`). Timeouts: SEARCH/DETAILS 25 s, default 8 s.
+- `src/tools.ts` — registre de les tools (coverage + nearby + list, search, details, options, currencies, policies, booking).
 - `src/knowledge/policies.ts` — 11 polítiques (font: corpus RAG de `webs/ia`).
 - `src/server.ts` — `buildServer`, `runStdio`, `runHttp`.
 - `docs/desplegament.md` — desplegament **sense Docker**.
+
+**Cobertura — ciutats properes (`/ai/cities/nearby`, a `motion4rent-api/routes/ai.js`):** donada una lat/lon (que passa el caller MCP/IA), retorna les ciutats **cobertes** més properes amb `distance_km`+país+nº botigues. Cobertura = mateixa definició que `/ai/cities` (`stores.status=1` o `stores_virtual.deleted_at IS NULL`). ⚠️ **Convenció de coordenades (a foc): `c0(_city)`=LATITUD, `c1(_city)`=LONGITUD** — confirmat pel buscador de producció (`search.js`: `ST_Distance_Sphere(POINT(c1_city, c0_city), POINT(lon, lat))`). El haversine de `/landings_nearby_places` té `c0`/`c1` **intercanviats** (bug latent) → **NO** replicar-lo. `list_coverage_cities` reutilitza `/statics/city-slug-map` (sense coords). Tots dos reutilitzables pel projecte `webs/ia`.
 
 **Detall important de `/details` (verificat contra prod):** `data[0]` és la BOTIGA+tarifa; **`data[0].details` és el PRODUCTE**. `normalizeDetails` pren `name/type` de `details`, `deposit` de `data[0].bail`. Les specs (pes/autonomia) **NO** venen a `/details` (viuen a `/products/load`).
 

@@ -11,6 +11,8 @@ import { buildResultsLink, slugCiudad } from "./deeplink.js";
 import {
   apiLocale,
   geocodeCity,
+  nearbyCitiesWithCoverage,
+  listCoverageCities,
   searchResults,
   getDetails,
   getProductLoad,
@@ -89,7 +91,8 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       annotations: { readOnlyHint: true, openWorldHint: true },
       description:
         "Check whether Motion4Rent operates in a city and disambiguate homonyms (same city name in several countries). " +
-        "Use before searching if the country is ambiguous.",
+        "Use before searching if the country is ambiguous. If the city is NOT covered, do not guess nearby cities: call " +
+        "find_nearby_cities_with_coverage with that city's approximate lat/lon to get the real closest covered cities.",
       inputSchema: {
         city: z.string().describe("City name (any language), e.g. 'Barcelona'"),
       },
@@ -110,6 +113,134 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         );
       } catch (e) {
         return errResult(`Error checking coverage: ${(e as Error).message}`);
+      }
+    },
+  );
+
+  // 1a) CIUTATS PROPERES AMB COBERTURA (donada una ciutat, coberta o no).
+  server.registerTool(
+    "find_nearby_cities_with_coverage",
+    {
+      title: "Find nearby cities with coverage (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      description:
+        "Given a city (typically one WITHOUT coverage, e.g. Hamburg), returns the CLOSEST cities where Motion4Rent " +
+        "actually operates, sorted by distance (km), with country and number of stores. Use this instead of guessing " +
+        "nearby cities. IMPORTANT: you MUST pass the approximate 'lat'/'lon' of the named city (you know major-city " +
+        "coordinates; for 'nearby' an approximation is fine). If the city itself is covered, you can reuse the lat/lon " +
+        "from check_city_coverage's places[]. Then present the real nearest covered cities (do NOT invent coverage or " +
+        "distances), and offer to search there. Delivery to the uncovered city itself is NOT available through this " +
+        "assistant — for that, give the Motion4Rent contact channels.",
+      inputSchema: {
+        city: z.string().describe("Name of the reference city (for labelling), e.g. 'Hamburg'."),
+        lat: z.number().describe("Approximate latitude of that city (decimal degrees), e.g. 53.55."),
+        lon: z.number().describe("Approximate longitude of that city (decimal degrees), e.g. 9.99."),
+        radius_km: z
+          .number()
+          .optional()
+          .describe("Max distance in km (default 60, max 300). Increase (e.g. 150) if nothing is found nearby."),
+        country: z
+          .string()
+          .optional()
+          .describe("ISO alpha-2 country code (e.g. 'de') to restrict results to one country. Optional."),
+      },
+    },
+    async ({ city, lat, lon, radius_km, country }) => {
+      try {
+        const places = await nearbyCitiesWithCoverage(config.apiBaseUrl, lat, lon, {
+          country,
+          radius: radius_km,
+          limit: 25,
+        });
+        if (!places.length) {
+          return jsonResult(
+            `No Motion4Rent coverage found near "${city}" within ${radius_km ?? 60} km. Try a larger radius_km ` +
+              `(e.g. 150) or give the user the Motion4Rent contact channels.`,
+            { city, origin: { lat, lon }, radius_km: radius_km ?? 60, count: 0, places: [] },
+          );
+        }
+        const out = places.map((p) => ({
+          city: p.cityEn,
+          city_es: p.cityEs,
+          country: p.country,
+          distance_km: p.distanceKm,
+          stores: p.stores,
+          url: p.url, // slug per a deep-links / search_mobility_rentals
+        }));
+        const top = out
+          .slice(0, 5)
+          .map((p) => `${p.city} (${String(p.country).toUpperCase()}, ~${p.distance_km} km)`)
+          .join(", ");
+        return jsonResult(
+          `Nearest Motion4Rent cities to "${city}": ${top}${out.length > 5 ? `, +${out.length - 5} more` : ""}. ` +
+            `Offer to search in one of them (use search_mobility_rentals with that city). Delivery to "${city}" itself ` +
+            `is NOT available through this assistant; for that, share the Motion4Rent contact channels.`,
+          {
+            reference_city: city,
+            origin: { lat, lon },
+            radius_km: radius_km ?? 60,
+            count: out.length,
+            cities: out,
+            note:
+              "These are the REAL closest cities with a Motion4Rent store (physical or virtual). Do NOT claim coverage " +
+              "for the reference city or any town not in this list, and do NOT invent distances. Being near a covered " +
+              "city does not mean delivery to the reference city — offer renting IN a listed city (store pickup or " +
+              "delivery within it). For the uncovered place, give the contact channels: form " +
+              "https://www.motion4rent.com/contact, email info@motion4rent.com, phone +34 932 20 15 13, WhatsApp +34 931 66 70 77.",
+          },
+        );
+      } catch (e) {
+        return errResult(`Error finding nearby cities: ${(e as Error).message}`);
+      }
+    },
+  );
+
+  // 1b) LLISTAT de ciutats amb cobertura (opcionalment per país).
+  server.registerTool(
+    "list_coverage_cities",
+    {
+      title: "List cities with coverage (Motion4Rent)",
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      description:
+        "Lists the cities where Motion4Rent operates, optionally filtered by country. Use it to answer 'where do you " +
+        "operate?' or 'which cities in <country>?'. Returns city name, country and slug. It does NOT include availability " +
+        "or prices — use search_mobility_rentals for a specific city and dates.",
+      inputSchema: {
+        country: z
+          .string()
+          .optional()
+          .describe("ISO alpha-2 country code (e.g. 'de', 'es') to filter. Omit to list all covered cities."),
+      },
+    },
+    async ({ country }) => {
+      try {
+        const cities = await listCoverageCities(config.apiBaseUrl, { country });
+        if (!cities.length) {
+          return jsonResult(
+            country
+              ? `Motion4Rent has no listed coverage in country "${country}".`
+              : `No coverage cities available.`,
+            { country: country ?? null, count: 0, cities: [] },
+          );
+        }
+        // Agrupem per país perquè l'assistent pugui presentar-ho net.
+        const byCountry: Record<string, string[]> = {};
+        for (const c of cities) (byCountry[c.country] ??= []).push(c.cityEn);
+        const out = cities.map((c) => ({ city: c.cityEn, country: c.country, url: c.slug }));
+        const summary = country
+          ? `Motion4Rent operates in ${cities.length} cities in ${country.toUpperCase()}.`
+          : `Motion4Rent operates in ${cities.length} cities across ${Object.keys(byCountry).length} countries.`;
+        return jsonResult(summary, {
+          country: country ?? null,
+          count: cities.length,
+          by_country: byCountry,
+          cities: out,
+          note:
+            "These are the cities with a Motion4Rent store. To check availability/prices for specific dates, call " +
+            "search_mobility_rentals with the city and dates. Do NOT claim coverage for cities not in this list.",
+        });
+      } catch (e) {
+        return errResult(`Error listing coverage cities: ${(e as Error).message}`);
       }
     },
   );
