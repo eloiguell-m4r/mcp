@@ -11,19 +11,20 @@ Motion4Rent
 ```
 (marca; evitem noms genèrics d'una paraula que no siguin marca — aquest ho és)
 
-**Tagline** (≤55) — tria'n una:
+**Tagline** (≤55) — tria'n una. ⚠️ Digues **"mobility scooters"**, no "scooters" a seques (evita que
+s'entengui com a patinets/motos):
 ```
-Rent wheelchairs & scooters worldwide, delivered
+Rent wheelchairs & mobility scooters, delivered
 ```
-(48 car.) · alternatives:
+(47 car.) · alternatives:
 ```
-Mobility equipment rentals in cities worldwide      (50)
-Wheelchairs & scooters, delivered where you travel   (51)
+Mobility equipment rentals in cities worldwide       (50)
+Wheelchairs & mobility scooters, delivered on trips  (51)
 ```
 
 **Descripció** (≤2000)
 ```
-Motion4Rent lets you rent mobility equipment — manual and electric wheelchairs, mobility scooters, knee walkers, rollators and more — in cities around the world, through a network of trusted local partners.
+Motion4Rent lets you rent mobility equipment — manual and electric wheelchairs, mobility scooters, knee walkers, rollators and similar mobility aids — in cities around the world, through a network of trusted local partners. It rents mobility aids only: not bicycles, e-bikes, motorbikes or cars.
 
 Tell the assistant your city and travel dates and it finds available equipment with the FINAL price (taxes and management fee already included — no surprises), product photos, key specs (max weight, range, folding, type) and the delivery options that actually apply: store pickup, delivery to your home, hotel or apartment, airport, or cruise port. When you're ready, it prepares the booking and returns a secure Stripe payment link you open to pay — the assistant never sees or handles your card details.
 
@@ -105,6 +106,13 @@ que Sevilla mostri disponibilitat encara que sigui fora d'horari). Exemple: dive
    es pot ignorar/deixar caducar.
 
 ## Notes
+- ⚠️ **DOMINI (evitar "bikes").** Abans de connectar, l'assistent només veu aquesta fitxa; si el text és
+  vague extrapola i inventa categories (bug real: deia *"scooters and bikes"*). Per això la descripció
+  esmenta **només ajudes de mobilitat** i inclou l'**exclusió explícita** (no bicis/e-bikes/motos/cotxes),
+  i les taglines diuen **"mobility scooters"**, no "scooters" pelat. Mantén-ho en publicar i en qualsevol
+  camp lliure (tags/casos d'ús): res de "bikes"/"scooters" genèric ni icona de vehicle de dues rodes.
+  En runtime ja ho reforcen `SERVER_INSTRUCTIONS` (`src/server.ts`) i la descripció de
+  `search_mobility_rentals` (`src/tools.ts`) — la fitxa ha de dir el mateix (capa pre-connexió).
 - Les **anotacions** de tools ja hi són (`readOnlyHint` a les de lectura; `create_booking` marcada
   com a escriptura no destructiva). Vegeu `docs/publicar-directori-claude.md`.
 - ChatGPT demana a més **logo/icona**, **captures de pantalla** i **prompts de prova amb la resposta

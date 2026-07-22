@@ -284,11 +284,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         pickup_time: z
           .string()
           .optional()
-          .describe("Pickup time HH:MM (e.g. '10:00'). ALWAYS ask the user; affects availability. Default 10:00 if unknown."),
+          .describe("Pickup time HH:MM (e.g. '10:00'). ALWAYS ask the user; affects availability. Default 10:00 if unknown. Stores operate daytime hours, so early-morning/late-night times (e.g. before 08:00 or after 20:00) may return no availability."),
         return_time: z
           .string()
           .optional()
-          .describe("Return time HH:MM (e.g. '18:00'). ALWAYS ask the user; affects availability. Default 10:00 if unknown."),
+          .describe("Return time HH:MM (e.g. '18:00'). ALWAYS ask the user; affects availability. Default 10:00 if unknown. Stores operate daytime hours, so a late return (e.g. 23:00) may return no availability — that is a TIME limit, not a lack of stock on those dates."),
       },
     },
     async ({ city, start_date, end_date, product_type, country, language, currency, pickup_time, return_time }) => {
@@ -313,18 +313,43 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         const place = candidates[0];
         const locale = apiLocale(lang);
 
-        const search = await searchResults(config.apiBaseUrl, {
+        // Hores EFECTIVES: les demanades per l'usuari (o cap → l'API usa 10:00). Si la cerca amb hores
+        // no estàndard surt buida, potser el problema és l'HORA (les botigues operen en horari diürn;
+        // l'API exclou la botiga si la recollida/devolució cau fora del seu horari — devolució >20:00 →
+        // 0 resultats), NO les dates. Ho distingim amb un probe a hores estàndard (10:00).
+        let effSh = toApiTime(pickup_time);
+        let effEh = toApiTime(return_time);
+        const searchArgs = {
           country: place.country,
           citySlug: place.url || slugCiudad(city),
           start: start_date,
           end: end_date,
-          sh: toApiTime(pickup_time),
-          eh: toApiTime(return_time),
           locale,
           type: 0,
           lat: place.lat,
           lon: place.lon,
-        });
+        };
+
+        let search = await searchResults(config.apiBaseUrl, { ...searchArgs, sh: effSh, eh: effEh });
+
+        // Hores "custom" = alguna hora demanada i diferent de la per defecte (10:00 = "1000").
+        const usedCustomTimes = (!!effSh && effSh !== "1000") || (!!effEh && effEh !== "1000");
+        // null = no s'han demanat hores concretes; true/false = disponibilitat a les hores demanades.
+        let availableAtRequestedTimes: boolean | null = usedCustomTimes ? search.number > 0 : null;
+        let timeFallbackUsed = false;
+        if (search.number === 0 && usedCustomTimes) {
+          // Reintent (una sola vegada) amb hores estàndard per veure si la DATA té stock.
+          const probe = await searchResults(config.apiBaseUrl, { ...searchArgs, sh: "1000", eh: "1000" });
+          if (probe.number > 0) {
+            // La data SÍ té stock: el buit era per l'hora demanada. A partir d'aquí treballem amb 10:00
+            // (detall/preu/link coherents amb els resultats que ensenyem).
+            search = probe;
+            effSh = "1000";
+            effEh = "1000";
+            timeFallbackUsed = true;
+            availableAtRequestedTimes = false;
+          }
+        }
 
         const name = lang.toLowerCase().startsWith("es")
           ? place.cityEs ?? place.cityEn ?? city
@@ -339,6 +364,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           urlCiudad: place.url || slugCiudad(city),
           inicio: start_date,
           final: end_date,
+          // Hores EFECTIVES (si hem fet fallback, 10:00) → el link mostra els mateixos resultats que la tool,
+          // no una franja buida. Abans no s'hi passaven i el link sempre anava a 10:00 (incoherent amb 23:00).
+          sh: effSh,
+          eh: effEh,
           lat: place.lat,
           lon: place.lon,
           name: name ?? undefined,
@@ -405,8 +434,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
                 idVirtual: p.id_virtual ?? 0,
                 start: start_date,
                 end: end_date,
-                sh: toApiTime(pickup_time),
-                eh: toApiTime(return_time),
+                // Hores EFECTIVES (= les de la cerca que ha donat aquests resultats; 10:00 si hi ha hagut
+                // fallback) → preu/detall coherents amb la cerca.
+                sh: effSh,
+                eh: effEh,
                 locale,
                 // Recàrrec de dia festiu detectat per la cerca → preu del detall correcte (inclou closed_price).
                 pickupClosedService: p.pickup_closed_service,
@@ -496,10 +527,15 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           requestedTypeNotFound && product_type
             ? ` ⚠️ Motion4Rent has NO '${product_type}' in ${name} for these dates; the options below are OTHER available mobility categories — tell the user '${product_type}' is not available here and offer these instead. Do NOT relabel them as '${product_type}', and do NOT claim Motion4Rent offers categories it does not rent (e.g. bikes/motorbikes).`
             : "";
+        // Hi ha stock a la DATA però NO a l'hora demanada (fallback a hores estàndard): dir-ho clarament
+        // i NO atribuir-ho a les dates.
+        const timeMsg = timeFallbackUsed
+          ? ` ⚠️ TIMES: there IS availability on these dates, but NOT at the requested times (pickup ${pickup_time ?? "?"}, return ${return_time ?? "?"}). Motion4Rent stores operate daytime hours, so that time isn't possible; the options below use standard daytime times (10:00). Tell the user the DATE has stock but their requested time isn't available and they can adjust the time on the website — do NOT say there is no availability on these dates.`
+          : "";
         const summary =
           search.number > 0
             ? `Motion4Rent has ${effectiveCount} ${scope} in ${name}, ${place.country.toUpperCase()} (${start_date} → ${end_date}). ` +
-              `Showing ${shown.length}${truncated ? ` of ${effectiveCount} (open the booking link for the rest)` : " (all of them)"}.${typeMsg}${confirmMsg} Booking link: ${bookingLink}`
+              `Showing ${shown.length}${truncated ? ` of ${effectiveCount} (open the booking link for the rest)` : " (all of them)"}.${timeMsg}${typeMsg}${confirmMsg} Booking link: ${bookingLink}`
             : `Motion4Rent has no availability in ${name}, ${place.country.toUpperCase()} for these dates.${confirmMsg} Link to review/other dates: ${bookingLink}`;
 
         return jsonResult(summary, {
@@ -517,6 +553,13 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           // Tipus demanat per l'usuari i si n'hi ha realment en aquesta ciutat/dates (null si no n'ha demanat cap).
           requested_type: product_type ?? null,
           requested_type_available: product_type ? !requestedTypeNotFound : null,
+          // Hores: si l'usuari ha demanat hores concretes, si n'hi ha stock a AQUESTES hores (null si no
+          // n'ha demanat). Si és false, la DATA té stock però l'hora demanada no és possible (horari botiga).
+          available_at_requested_times: availableAtRequestedTimes,
+          requested_pickup_time: pickup_time ?? null,
+          requested_return_time: return_time ?? null,
+          times_used: { sh: effSh ?? "1000", eh: effEh ?? "1000" },
+          time_fallback_used: timeFallbackUsed,
           products: productsOut,
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
@@ -526,6 +569,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             "in 'product_types_available'/'products'; NEVER claim it offers bikes or any category not listed here. If " +
             "'requested_type_available' is false, tell the user their requested type is not available in this city/dates and " +
             "offer the categories that ARE returned (do not relabel them as the requested type). " +
+            "TIMES: pickup/return time affects availability — stores operate daytime hours and a time outside them (e.g. a " +
+            "23:00 return) returns NO results for that time. If 'available_at_requested_times' is false, the DATE HAS stock " +
+            "but the requested time is not possible: say EXACTLY that, present the options shown (they use standard daytime " +
+            "times, see 'times_used') and suggest adjusting the time on the website — do NOT tell the user there is no " +
+            "availability on these dates. " +
             "The city was resolved to 'resolved_city' (name + country) — Motion4Rent's coverage list only knows cities it " +
             "operates in, so it will silently pick the covered one. If 'confirm_country' is true (or the user named a city " +
             "WITHOUT a country that can exist in several countries, e.g. Córdoba ES/AR/MX), CONFIRM with the user this is the " +
