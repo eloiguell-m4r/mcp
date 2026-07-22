@@ -13,10 +13,30 @@ import { createRemoteJWKSet, jwtVerify, decodeJwt } from "jose";
 import { config } from "./config.js";
 import { registerTools } from "./tools.js";
 
-const SERVER_INFO = { name: "motion4rent-mcp", version: "0.1.0" };
+const SERVER_INFO = {
+  name: "motion4rent-mcp",
+  title: "Motion4Rent — mobility equipment rental",
+  version: "0.1.0",
+};
+
+// Instruccions de servidor (MCP): el client (Claude/ChatGPT) les rep i les usa per descriure/usar el
+// connector. Fixen el DOMINI de forma estricta perquè l'assistent no extrapoli categories que no
+// existeixen (bug observat: en presentar el connector deia "scooters and bikes" — Motion4Rent NO lloga
+// bicicletes ni motos). Regla clau: no afirmar cap categoria fins que una cerca la retorni.
+const SERVER_INSTRUCTIONS =
+  "Motion4Rent rents MOBILITY EQUIPMENT (mobility aids) for people with reduced mobility: manual and " +
+  "electric wheelchairs, mobility scooters (electric 3/4-wheel scooters for reduced-mobility users, " +
+  "NOT kick scooters, NOT motorbikes/mopeds), knee scooters, rollators/walkers and similar aids. " +
+  "Motion4Rent does NOT rent bicycles, e-bikes, motorbikes, mopeds or cars — never say or imply it does. " +
+  "When describing this connector, mention ONLY mobility aids; do NOT list or invent other categories " +
+  "(e.g. bikes). The exact catalogue depends on the city and dates: do NOT claim any specific product " +
+  "category is available until search_mobility_rentals actually returns it, and then present only the " +
+  "categories in its 'product_types_available'/'products'. If the user asks for something Motion4Rent " +
+  "does not rent (a bicycle, a motorbike, a car), say clearly it is not offered rather than substituting " +
+  "another category. Prices returned already include fees — quote them as-is.";
 
 function buildServer(): McpServer {
-  const server = new McpServer(SERVER_INFO);
+  const server = new McpServer(SERVER_INFO, { instructions: SERVER_INSTRUCTIONS });
   registerTools(server, config);
   return server;
 }

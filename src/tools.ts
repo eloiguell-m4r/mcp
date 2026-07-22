@@ -252,11 +252,15 @@ export function registerTools(server: McpServer, config: AppConfig): void {
       title: "Search mobility rentals (Motion4Rent)",
       annotations: { readOnlyHint: true, openWorldHint: true },
       description:
-        "Search available Motion4Rent mobility equipment (wheelchairs, scooters, etc.) in a city and date range, " +
-        "with the FINAL total price per product ('total', already includes the management fee and taxes — quote it as-is, " +
-        "do NOT add or estimate fees) and a photo (image_url). Also returns a LINK to the website where the user can " +
-        "complete delivery, options and payment (this tool does NOT book or charge). If the city name is a homonym " +
-        "across countries, pass 'country'.",
+        "Search available Motion4Rent MOBILITY equipment in a city and date range. Motion4Rent rents mobility aids " +
+        "for people with reduced mobility — manual and electric wheelchairs, mobility scooters (electric 3/4-wheel " +
+        "scooters for reduced mobility, NOT kick scooters or motorbikes), knee scooters and rollators/walkers. It does " +
+        "NOT rent bicycles, e-bikes, motorbikes or cars. Present ONLY the categories this tool actually returns (see " +
+        "'product_types_available'/'products'); never claim or imply Motion4Rent offers bikes or any category not " +
+        "returned. Each product includes the FINAL total price ('total', already includes the management fee and taxes " +
+        "— quote it as-is, do NOT add or estimate fees) and a photo (image_url). Also returns a LINK to the website " +
+        "where the user can complete delivery, options and payment (this tool does NOT book or charge). If the city " +
+        "name is a homonym across countries, pass 'country'.",
       inputSchema: {
         city: z.string().describe("City, e.g. 'Barcelona'"),
         start_date: DATE.describe("Start date (YYYY-MM-DD)"),
@@ -346,6 +350,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         // així que sense filtrar només uns pocs del tipus demanat caben dins del sostre.
         let matched = search.productos;
         let typeFilterLabel: string | null = null;
+        // Cert si l'usuari ha demanat un tipus concret però NO n'hi ha en aquesta ciutat/dates: llavors
+        // ensenyem la resta com a alternativa, però ho senyalitzem perquè l'assistent NO faci passar
+        // un altre tipus pel demanat (ni inventi categories) — ha de dir clarament que el tipus demanat
+        // no hi és i oferir els que sí que hi ha.
+        let requestedTypeNotFound = false;
         if (product_type && product_type.trim()) {
           const pt = normText(product_type);
           // 1) Resol el tipus canònic del catàleg (typesProducts) pel millor solapament de tokens.
@@ -358,10 +367,12 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             const pn = normText(p.name ?? "");
             return targetName ? pn === targetName : tokenOverlap(pt, pn) > 0;
           });
-          // Només apliquem el filtre si troba coincidències (si no, val més mostrar-ho tot).
+          // Només apliquem el filtre si troba coincidències (si no, mostrem la resta però ho marquem).
           if (filtered.length) {
             matched = filtered;
             typeFilterLabel = best?.t.name ?? product_type.trim();
+          } else {
+            requestedTypeNotFound = true;
           }
         }
 
@@ -480,10 +491,15 @@ export function registerTools(server: McpServer, config: AppConfig): void {
         const confirmMsg = confirmCountry
           ? ` ⚠️ '${city}' exists in several countries; these results are for ${name} (${place.country.toUpperCase()}). CONFIRM with the user this is the ${place.country.toUpperCase()} city they mean before booking.`
           : "";
+        // Tipus demanat però inexistent aquí: cal dir-ho clarament i NO fer passar un altre tipus pel demanat.
+        const typeMsg =
+          requestedTypeNotFound && product_type
+            ? ` ⚠️ Motion4Rent has NO '${product_type}' in ${name} for these dates; the options below are OTHER available mobility categories — tell the user '${product_type}' is not available here and offer these instead. Do NOT relabel them as '${product_type}', and do NOT claim Motion4Rent offers categories it does not rent (e.g. bikes/motorbikes).`
+            : "";
         const summary =
           search.number > 0
             ? `Motion4Rent has ${effectiveCount} ${scope} in ${name}, ${place.country.toUpperCase()} (${start_date} → ${end_date}). ` +
-              `Showing ${shown.length}${truncated ? ` of ${effectiveCount} (open the booking link for the rest)` : " (all of them)"}.${confirmMsg} Booking link: ${bookingLink}`
+              `Showing ${shown.length}${truncated ? ` of ${effectiveCount} (open the booking link for the rest)` : " (all of them)"}.${typeMsg}${confirmMsg} Booking link: ${bookingLink}`
             : `Motion4Rent has no availability in ${name}, ${place.country.toUpperCase()} for these dates.${confirmMsg} Link to review/other dates: ${bookingLink}`;
 
         return jsonResult(summary, {
@@ -498,10 +514,18 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           count: effectiveCount,
           total_all_types: search.number,
           type_filter: typeFilterLabel,
+          // Tipus demanat per l'usuari i si n'hi ha realment en aquesta ciutat/dates (null si no n'ha demanat cap).
+          requested_type: product_type ?? null,
+          requested_type_available: product_type ? !requestedTypeNotFound : null,
           products: productsOut,
           product_types_available: search.typesProducts,
           booking_link: bookingLink,
           note:
+            "DOMAIN: Motion4Rent rents MOBILITY AIDS only (manual/electric wheelchairs, mobility scooters, knee scooters, " +
+            "rollators/walkers). It does NOT rent bicycles, e-bikes, motorbikes or cars. Mention ONLY the categories present " +
+            "in 'product_types_available'/'products'; NEVER claim it offers bikes or any category not listed here. If " +
+            "'requested_type_available' is false, tell the user their requested type is not available in this city/dates and " +
+            "offer the categories that ARE returned (do not relabel them as the requested type). " +
             "The city was resolved to 'resolved_city' (name + country) — Motion4Rent's coverage list only knows cities it " +
             "operates in, so it will silently pick the covered one. If 'confirm_country' is true (or the user named a city " +
             "WITHOUT a country that can exist in several countries, e.g. Córdoba ES/AR/MX), CONFIRM with the user this is the " +
