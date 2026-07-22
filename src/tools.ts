@@ -13,6 +13,8 @@ import {
   geocodeCity,
   nearbyCitiesWithCoverage,
   listCoverageCities,
+  getStoreHours,
+  openCloseForDate,
   searchResults,
   getDetails,
   getProductLoad,
@@ -427,7 +429,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           shown.map(async (p) => {
             // /details → preu/lliurament/pickup/cancel·lació (amb fees). products/load → MODEL + specs reals.
             // (el model i les specs "de veritat" NO són a /details; viuen a products/load, com al web).
-            const [detail, load, opts] = await Promise.all([
+            const [detail, load, opts, hours] = await Promise.all([
               getDetails(config.apiBaseUrl, {
                 idProductStore: p.id_product_store ?? 0,
                 idStore: p.id_store ?? 0,
@@ -453,7 +455,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               }).catch(() => null),
               // Extres/add-ons: perquè el llistat ja informi que n'hi ha (abans no ho deia fins a demanar-ho).
               getProductOptions(config.apiBaseUrl, p.id_product_store ?? 0).catch(() => []),
+              // Horari de la botiga (cachejat per id_store) → primera recollida / última devolució reals.
+              getStoreHours(config.apiBaseUrl, p.id_store ?? 0).catch(() => []),
             ]);
+            const pickupHours = openCloseForDate(hours, start_date);
+            const returnHours = openCloseForDate(hours, end_date);
             const src = (detail?.currency ?? p.currency ?? "EUR").toUpperCase();
             const rate = await rateFor(src);
             // Preu EXACTE de /details (amb fee de gestió). Fallback: base de cerca + fee de gestió.
@@ -508,6 +514,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
               free_cancellation_until: freeCancellationUntil(start_date, p.cancellation_days, p.cancellation_refundable),
               cancellation_refundable: p.cancellation_refundable,
               cancellation_days: p.cancellation_days,
+              // Horari REAL de la botiga per als dies de la reserva: primera recollida (dia inici) i última
+              // devolució (dia fi). null si l'horari no s'ha pogut determinar. Respondre "fins a quina hora?"
+              // amb latest_return_time (no endevinar; no quedar-se curt).
+              earliest_pickup_time: pickupHours.earliest_open,
+              latest_return_time: returnHours.latest_close,
               // Flags de dia festiu: cal passar-los a create_booking perquè cobri el recàrrec correcte.
               pickup_closed_service: p.pickup_closed_service ? 1 : 0,
               delivery_closed_service: p.delivery_closed_service ? 1 : 0,
@@ -573,7 +584,10 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             "23:00 return) returns NO results for that time. If 'available_at_requested_times' is false, the DATE HAS stock " +
             "but the requested time is not possible: say EXACTLY that, present the options shown (they use standard daytime " +
             "times, see 'times_used') and suggest adjusting the time on the website — do NOT tell the user there is no " +
-            "availability on these dates. " +
+            "availability on these dates. Each product also carries 'earliest_pickup_time'/'latest_return_time' = the " +
+            "store's REAL opening/closing for the rental dates: answer 'what time can I pick up / return it?' with these " +
+            "EXACT values — do NOT guess by trying times, and do NOT under-report (if 'latest_return_time' is 20:00, say " +
+            "20:00, not 19:00). " +
             "The city was resolved to 'resolved_city' (name + country) — Motion4Rent's coverage list only knows cities it " +
             "operates in, so it will silently pick the covered one. If 'confirm_country' is true (or the user named a city " +
             "WITHOUT a country that can exist in several countries, e.g. Córdoba ES/AR/MX), CONFIRM with the user this is the " +
@@ -637,7 +651,7 @@ export function registerTools(server: McpServer, config: AppConfig): void {
     },
     async ({ id_product_store, id_store, id_virtual, start_date, end_date, language, currency, pickup_time, return_time, pickup_closed_service, delivery_closed_service }) => {
       try {
-        const [detail, options] = await Promise.all([
+        const [detail, options, hours] = await Promise.all([
           getDetails(config.apiBaseUrl, {
             idProductStore: id_product_store,
             idStore: id_store,
@@ -651,7 +665,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             deliveryClosedService: delivery_closed_service === 1,
           }),
           getProductOptions(config.apiBaseUrl, id_product_store).catch(() => []),
+          // Horari REAL de la botiga (cachejat) → primera recollida / última devolució exactes.
+          getStoreHours(config.apiBaseUrl, id_store).catch(() => []),
         ]);
+        const pickupHours = openCloseForDate(hours, start_date);
+        const returnHours = openCloseForDate(hours, end_date);
         if (!detail) {
           return jsonResult("No detail found for this product on these dates.", {
             found: false,
@@ -727,6 +745,11 @@ export function registerTools(server: McpServer, config: AppConfig): void {
           },
           // NOMÉS enllaç de mapa (no exposem el nom del partner; el nom només s'usa per construir el link).
           store: { map_url: storeMapUrl(detail.store_place_id, detail.store_name) },
+          // Horari REAL de la botiga per als dies de la reserva (obertura/tancament). Última devolució =
+          // latest_return_time; primera recollida = earliest_pickup_time. null si no s'ha pogut determinar.
+          store_hours: { pickup_day: pickupHours, return_day: returnHours },
+          earliest_pickup_time: pickupHours.earliest_open,
+          latest_return_time: returnHours.latest_close,
           delivery_options: deliveryOptions,
           options: options.map((o) => ({
             id: o.id,
@@ -744,7 +767,12 @@ export function registerTools(server: McpServer, config: AppConfig): void {
             "the 'category' as a small heading above it, and its 'attributes' (specs: max weight, " +
             "range, folding, type…). When presenting the details, INCLUDE the product photo as a clickable markdown image " +
             "![name](image_url). Do NOT reveal the store name; show only a 'View location' link (map_url). Do NOT show " +
-            "internal ids. Offer only these delivery_options.",
+            "internal ids. Offer only these delivery_options. " +
+            "STORE HOURS: 'earliest_pickup_time'/'latest_return_time' (and 'store_hours') are the store's REAL opening/" +
+            "closing for the rental dates. Answer 'what time can I pick up / return it?' with these EXACT values — do NOT " +
+            "guess and do NOT under-report (if 'latest_return_time' is 20:00, the latest return is 20:00, not 19:00). A " +
+            "pickup/return outside these hours returns no availability. If they are null, the schedule couldn't be read — " +
+            "say the exact time is confirmed on the booking page rather than guessing.",
         };
         const summary =
           `Motion4Rent — "${detail.name ?? "product"}" (prices in ${displayCurrency}). ` +

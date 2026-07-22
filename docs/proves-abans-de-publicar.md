@@ -59,6 +59,18 @@ Prova també **moneda** ("show prices in USD") i **filtre per tipus** ("only sco
 
 - [ ] **Ciutat homònima**: "wheelchair in Valencia" sense país → ha de demanar el país (ES/VE).
 - [ ] **Sense disponibilitat**: dates/ciutat sense estoc → missatge clar + `booking_link`, sense petar.
+- [ ] **HORA fora d'horari ≠ sense estoc a la data**: cerca amb **devolució 23:00** (p. ex. "…pickup 10:00,
+      return 23:00") en una ciutat/dates que SÍ tenen estoc → NO ha de dir "no availability for these dates".
+      Ha de retornar `available_at_requested_times:false` + `time_fallback_used:true`, mostrar opcions a
+      hores estàndard (10:00) i dir que la DATA té estoc però l'hora demanada no és possible (horari diürn de
+      botiga; l'API exclou >20:00). El `booking_link` ha de portar `sh`/`eh` **efectius** (10:00), coherent amb
+      els resultats. Amb **return 18:00** (dins horari) → resultats a les hores demanades i
+      `available_at_requested_times:true`. ⚠️ Regressió: cerca **sense** hores → una sola crida, igual que abans.
+- [ ] **Horari real (última devolució / primera recollida)**: "what is the last time I can return the scooter?"
+      → resposta amb l'hora EXACTA de tancament (p. ex. **20:00**), no endevinada ni curta (19:00), ni
+      "es confirma al checkout". `search_mobility_rentals` i `get_rental_details` porten
+      `earliest_pickup_time`/`latest_return_time` (i `store_hours` a details) per als dies de la reserva; si
+      són `null` (horari no llegible) l'assistent NO ha d'endevinar. Botiga de test Sevilla divendres → 10:00 / 20:00.
 - [ ] **Pickup NO disponible** (botiga virtual, p. ex. València): a `get_rental_details` **NO**
       apareix "Store pickup"; i si forces `create_booking` amb pickup → **400 `pickup_not_available`**.
 - [ ] **Filtre per tipus complet**: "electric wheelchairs in Valencia" → mostra'ls tots (≈15),

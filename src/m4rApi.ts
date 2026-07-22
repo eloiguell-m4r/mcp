@@ -190,6 +190,109 @@ export async function listCoverageCities(
   return [...filtered].sort((a, b) => a.country.localeCompare(b.country) || a.cityEn.localeCompare(b.cityEn));
 }
 
+// ---------------------------------------------------------------------------
+// Horari d'obertura d'una botiga (per respondre "fins a quina hora puc tornar-lo?" amb l'hora REAL,
+// no endevinant). Font: GET /stores/schedule/:id_store (ja existent). L'API compara pickup/return amb
+// aquest horari i exclou la botiga si cauen fora → aquí exposem obertura/tancament del dia demanat.
+// ---------------------------------------------------------------------------
+const DAYS_WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+export interface StoreDayHours {
+  date: string; // YYYY-MM-DD
+  open: boolean; // la botiga obre aquell dia de la setmana
+  earliest_open: string | null; // "HH:MM" (primera obertura del dia)
+  latest_close: string | null; // "HH:MM" (últim tancament del dia) = última hora de recollida/devolució
+}
+
+function safeJsonParse(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+/** Normalitza "H:MM"/"HH:MM"/"HHMM" a "HH:MM" (o null si no és vàlid). */
+function normHM(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) return `${m[1].padStart(2, "0")}:${m[2]}`;
+  m = s.match(/^(\d{2})(\d{2})$/);
+  if (m) return `${m[1]}:${m[2]}`;
+  return null;
+}
+
+/**
+ * Files (parsejades) de l'horari d'una botiga. Cachejat amb TTL llarg (horari gairebé estàtic).
+ * Errors / botiga sense horari → []. Mai llança (l'enriquiment no ha de trencar la cerca/detall).
+ */
+export async function getStoreHours(apiBase: string, idStore: number | string): Promise<any[]> {
+  const id = String(idStore ?? "").trim();
+  if (!id || id === "0") return [];
+  return memo(`schedule:${apiBase}:${id}`, 30 * 60_000, async () => {
+    try {
+      const body = unwrapBody(await getJson(`${apiBase}/stores/schedule/${encodeURIComponent(id)}`, DEFAULT_TIMEOUT_MS));
+      const rows: any[] = Array.isArray(body?.response) ? body.response : [];
+      return rows.map((r) => ({
+        active: Number(r.active ?? 0),
+        all_year: Number(r.all_year ?? 0),
+        start: r.start ?? null,
+        end: r.end ?? null,
+        // El pool read retorna el JSON ja parsejat; defensiu per si ve com a string.
+        schedule: typeof r.schedule === "string" ? safeJsonParse(r.schedule) : (r.schedule ?? null),
+      }));
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * Obertura/tancament d'una botiga per a una DATA concreta (segons el dia de la setmana).
+ * Tria les files actives aplicables (all_year o dins start..end), i sobre els slots del dia calcula
+ * la primera obertura i l'últim tancament (gestiona horari partit/migdiada). Dia tancat/desconegut → open:false.
+ * NO aplica cap sostre artificial (p. ex. 20:00): reporta el tancament REAL, que és el que usa el web.
+ */
+export function openCloseForDate(rows: any[], dateISO: string): StoreDayHours {
+  const base: StoreDayHours = { date: dateISO, open: false, earliest_open: null, latest_close: null };
+  if (!Array.isArray(rows) || !rows.length || !/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return base;
+  const d = new Date(`${dateISO}T12:00:00Z`); // migdia UTC: evita voreres de DST en calcular el dia
+  if (isNaN(d.getTime())) return base;
+  const day = DAYS_WEEK[d.getUTCDay()];
+
+  const byRange = rows.filter((r) => {
+    if (Number(r.active) !== 1 || !r.schedule) return false;
+    if (Number(r.all_year) === 1) return true;
+    const s = String(r.start ?? "").slice(0, 10);
+    const e = String(r.end ?? "").slice(0, 10);
+    return !!(s && e && s <= dateISO && dateISO <= e);
+  });
+  const rowsToUse = byRange.length
+    ? byRange
+    : rows.filter((r) => Number(r.active) === 1 && Number(r.all_year) === 1 && r.schedule);
+
+  const opens: string[] = [];
+  const closes: string[] = [];
+  for (const r of rowsToUse) {
+    const sch = r.schedule;
+    if (!sch || sch["open_" + day] != 1) continue;
+    const slots = Array.isArray(sch[day]) ? sch[day] : [];
+    for (const slot of slots) {
+      const o = normHM(slot?.["hours_" + day + "_open"]);
+      const c = normHM(slot?.["hours_" + day + "_close"]);
+      if (o) opens.push(o);
+      if (c) closes.push(c);
+    }
+  }
+  if (opens.length && closes.length) {
+    opens.sort(); // "HH:MM" amb zero-padding → ordre lexicogràfic correcte
+    closes.sort();
+    return { date: dateISO, open: true, earliest_open: opens[0], latest_close: closes[closes.length - 1] };
+  }
+  return base; // tancat o horari no determinable
+}
+
 export interface Producto {
   id_product_store: number | null;
   id_store: number | null;
