@@ -189,6 +189,26 @@ Sense bearer (connector públic): treu les dues últimes línies dels `args`
   correcte i que has reiniciat l'app del tot. Els logs de Claude Desktop són a
   `~/Library/Logs/Claude/`.
 
+## Reduir les confirmacions de tools
+Claude Desktop demana **confirmar cada tool** el primer cop que la crida. Això és una funció de
+**seguretat del CLIENT** (Claude Desktop), **no** del connector: el protocol MCP no permet que el
+servidor "auto-aprovi" les seves eines, així que **no es pot oferir "acceptar totes" des del connector**
+(ni és aconsellable fer-ho globalment).
+
+Com reduir-les (ho fa cada usuari al seu client):
+- Quan surt el diàleg de permís d'una tool, tria **"Allow always"** (o "Allow for this chat"). A partir
+  d'aleshores no torna a preguntar per aquella tool. Es fa un cop per tool (9 en total).
+- Les **8 tools de lectura** (`check_city_coverage`, `find_nearby_cities_with_coverage`,
+  `list_coverage_cities`, `search_mobility_rentals`, `get_rental_details`, `list_product_options`,
+  `list_currencies`, `mobility_policies`) estan marcades `readOnlyHint: true` → baix risc, segures
+  d'auto-aprovar amb "Allow always".
+- ⚠️ **`create_booking`**: millor **deixar-la amb confirmació**. Crea una reserva + enllaç de pagament
+  (acció real amb diners); està marcada com a escriptura precisament perquè el client la segueixi
+  demanant. No l'auto-aprovis.
+
+> El model de permisos és el mateix quan el connector s'afegeix per la UI de Connectors (OAuth): la
+> confirmació la gestiona sempre el client, no el servidor.
+
 ## Relacionat
 - Desplegament del servidor MCP i Cloudflare: `docs/desplegament-prod-runbook.md`.
 - Visió general de l'arquitectura del connector: `docs/desplegament.md`.

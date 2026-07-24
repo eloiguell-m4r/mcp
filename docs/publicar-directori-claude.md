@@ -30,6 +30,9 @@ manual de Claude Desktop).
     directori no deixa que l'usuari l'enganxi. Per publicar cal passar a (A) o (B).
   - Recomanació: **(A) per entrar ràpid**; **(B)** quan afegim funcions per usuari ("les meves
     reserves") o si els revisors ho demanen per la tool de reserva.
+  - **Estat real (2026-07-23): anem per la via (B) OAuth 2.1 i està DESPLEGADA i VERIFICADA en
+    prod.** AS = WorkOS AuthKit (`https://dazzling-tradition-17.authkit.app`). Vegeu la
+    verificació al final d'aquest document.
 - **Anotacions de tools**: totes han de tenir `title` i, segons el cas, `readOnlyHint` o
   `destructiveHint`.
   - Read-only (`readOnlyHint: true`): `check_city_coverage`, `search_mobility_rentals`,
@@ -76,18 +79,81 @@ Portal: **`https://claude.ai/admin-settings/directory/submissions/new`**
 
 ## Resum del que ens falta abans d'enviar
 
-1. ✅ **Auth (A) públic + rate-limiting** implementat (`server.ts`): `/mcp` públic per defecte,
-   bearer com a bypass intern, rate-limit per IP. (Falta desplegar-ho a prod.)
+1. ✅ **Auth (B) OAuth 2.1 (WorkOS AuthKit)** — DESPLEGADA i VERIFICADA en prod (2026-07-23; veure
+   «Verificació OAuth» a baix). El Resource Server (`server.ts`) valida el JWT (JWKS + `iss`/`exp`/`aud`)
+   i exposa la metadata RFC 9728. (L'auth (A) públic + rate-limit segueix al codi com a fallback amb
+   `OAUTH_ENABLED=false`.)
 2. ✅ **Anotacions** afegides a totes les tools (`tools.ts`): lectura → `readOnlyHint: true`;
    `create_booking` → `readOnlyHint: false, destructiveHint: false, idempotentHint: false`. (Falta desplegar.)
 3. ✅ **Política de privadesa**: afegida la secció "Booking through our AI assistant (Claude)"
    a `privacy.phtml` en tots els idiomes del web. (Falta desplegar el web.)
-4. Preparar **compte + guió de prova** per als revisors (truc de Sevilla).
+4. ✅ **Compte + guió de prova** per als revisors — guió fet a `docs/listing-directori.md` (auth per
+   compte WorkOS dedicat; walkthrough **Barcelona** + **qualsevol producte** + nom **"Anthropic Test"**;
+   exemple known-good verificat contra prod). Credencials del compte al guió i **login WorkOS verificat OK**.
 5. ✅ Tenir pla **Team/Enterprise** amb rol Owner per accedir al portal.
-6. Preparar textos del listing (nom, tagline, descripció, categories, icona).
+6. ✅ **Textos del listing** (a `docs/listing-directori.md`) — repassats i dins de límit: nom 11/100,
+   tagline 47/55, descripció 1388/2000, icona `favicon-512x512.png` (PNG 512×512 quadrada, 200 OK).
+   ✅ **URL de privadesa** (`https://www.motion4rent.com/privacy`) — ara **200** també a peticions
+   automàtiques (regla Cloudflare "Allow /privacy" Skip → Super Bot Fight Mode + Browser Integrity Check).
+   ✅ **URL de documentació del connector** (`https://www.motion4rent.com/connector`) — pàgina nova al
+   web (mòdul Cms: ruta `/connector` + `connectorAction` + `connector.phtml`), servint 200 amb el contingut
+   (què és, com afegir-lo, tools, booking/Stripe, privadesa, suport). ⏳ Pendent: triar les **categories**
+   del desplegable real del formulari.
+
+## Verificació OAuth (2026-07-23)
+
+Comprovació de la via (B) OAuth 2.1 contra **producció** i contra l'AS (WorkOS AuthKit). Tot ✅.
+
+**Codi (Resource Server, `src/server.ts`):** valida el JWT amb el JWKS remot de l'AS (`jose`),
+comprova `iss`/`exp`/`aud` (RFC 8707) i scopes; exposa `/.well-known/oauth-protected-resource`
+(RFC 9728); retorna 401 + `WWW-Authenticate: Bearer resource_metadata="…"` quan falta token; manté
+el bearer intern com a bypass; CORS exposa `WWW-Authenticate`.
+
+| Comprovació                 | Comanda                                                                                 | Resultat                                                                                                                 |
+| --------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Protected-resource metadata | `curl https://mcp.motion4rent.com/.well-known/oauth-protected-resource`                 | ✅ `resource`=`https://mcp.motion4rent.com/mcp`; `authorization_servers`=`["https://dazzling-tradition-17.authkit.app"]` |
+| `POST /mcp` sense token     | `curl -i -X POST …/mcp`                                                                 | ✅ **401** + `www-authenticate: Bearer resource_metadata="…"`                                                            |
+| AS metadata (WorkOS)        | `curl https://dazzling-tradition-17.authkit.app/.well-known/oauth-authorization-server` | ✅ authorize/token/jwks presents                                                                                         |
+| **CIMD**                    | (AS metadata)                                                                           | ✅ `client_id_metadata_document_supported: true`                                                                         |
+| **DCR**                     | (AS metadata)                                                                           | ✅ `registration_endpoint` present → Claude es registra sol                                                              |
+| **PKCE**                    | (AS metadata)                                                                           | ✅ `code_challenge_methods_supported: ["S256"]`                                                                          |
+| Grant types                 | (AS metadata)                                                                           | ✅ `authorization_code` + `refresh_token`                                                                                |
+
+Amb això, el pas 7 del formulari (Autenticació = OAuth 2.0) queda cobert: OAuth 2.1, PKCE S256, DCR/CIMD
+i redirect dinàmic (no cal registrar cap redirect URI manual de claude.ai).
+
+**Config de prod confirmada:** `OAUTH_AUDIENCE=https://mcp.motion4rent.com/mcp` (coincideix amb el
+Resource Indicator i amb `resource` de la metadata).
+
+**✅ Round-trip complet del token — CONFIRMAT (2026-07-23) via `mcp-remote` a Claude Desktop.** Amb el
+pont `mcp-remote@latest` apuntant a `https://mcp.motion4rent.com/mcp` (sense bearer), Claude Desktop
+completa el flux OAuth end-to-end (DCR + login WorkOS → consent → bescanvi de token PKCE) i **llista i
+executa les tools** (respon amb cobertura, etc.). Amb això queda validat tot el costat servidor de
+l'OAuth, inclòs l'audience binding (el token que emet WorkOS és acceptat pel Resource Server: signatura
+
+- `iss` + `aud` correctes), que era l'únic punt de risc que advertia `config.ts`.
+
+> **Matís de client:** `mcp-remote` és un pont local (stdio→HTTP) que fa l'OAuth al navegador i cacheja
+> el token a `~/.mcp-auth`. El **directori** usa en canvi el **connector remot natiu** (claude.ai connecta
+> directe a la URL, token exchange server-side, redirect `claude.ai/api/mcp/auth_callback`). El
+> comportament del SERVIDOR és idèntic en tots dos casos, i com que usem DCR/CIMD el redirect de claude.ai
+> s'accepta dinàmicament. Check final ideal abans d'enviar: afegir-lo un cop com a **custom connector
+> natiu** (Settings → Connectors → Add custom connector, enganxant la URL directament, sense mcp-remote)
+> per reproduir exactament el camí del revisor.
+
+> ℹ️ **Nota sobre l'MCP Inspector:** el flux OAuth de l'Inspector (SPA de navegador) pot fallar amb
+> `TypeError: Failed to fetch` _després_ del login. És una limitació de CORS del navegador contra el
+> token endpoint de WorkOS (la resposta del `POST /oauth2/token` no porta `Access-Control-Allow-Origin`),
+> **NO un defecte del connector ni de la config OAuth**: els clients reals de Claude fan el bescanvi del
+> token server-side i no s'hi veuen afectats (confirmat amb Claude Desktop, que funciona). Per validar
+> l'OAuth, usa Claude Desktop, no l'Inspector.
 
 ## Fonts
 
 - [Building custom connectors (docs oficials)](https://claude.com/docs/connectors/building)
 - [Get started with custom connectors using remote MCP](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
 - [Claude Connector Directory Submission (guia de tercers)](https://sunpeak.ai/blogs/claude-connector-directory-submission/)
+
+WorkOS user authentication for reviewers:
+anthropic-review@motion4rent.com
+2cC29ptI,[8y3D"=

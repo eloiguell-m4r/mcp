@@ -79,6 +79,21 @@ OAUTH_SCOPES=                                       # buit amb WorkOS
 - **MCP Inspector** (Transport *Streamable HTTP*, sense bearer) → ha d'iniciar el flux OAuth
   (login WorkOS → consent → token) i després `tools/list` OK. Vegeu `docs/mcp-inspector.md`.
 
+## 7) Crear el compte de prova per als revisors del directori
+El formulari del directori (pas 9) demana credencials d'un compte de prova. Com que el connector no té
+usuaris propis, es crea un usuari a AuthKit només perquè el revisor pugui completar el login OAuth.
+
+1. **Entorn correcte:** al dashboard, tria l'entorn el domini AuthKit del qual sigui el que usa prod
+   (`dazzling-tradition-17.authkit.app` → segurament **Production**). Confirma-ho a Authentication → Domains.
+2. **Requisit:** **Authentication → Methods** amb **"Email + Password" ON** (si només hi ha Magic Auth,
+   no hi ha contrasenya per compartir).
+3. **User Management → Users → Create user** → email + password; activa **Mark as verified** si hi és
+   (evita el correu de verificació que bloquejaria el login del revisor).
+4. **Comprova:** fes Sign in a `https://<domini>.authkit.app` amb aquestes credencials.
+5. Posa els valors reals a `docs/listing-directori.md` (`<TEST_ACCOUNT_EMAIL>`/`<TEST_ACCOUNT_PASSWORD>`).
+
+> Alternativa: amb "Email + Password" actiu, pots fer **Sign up** directament a la pàgina d'AuthKit.
+
 ## Notes
 - L'issuer (`OAUTH_ISSUER`) ha de coincidir EXACTAMENT amb el `iss` dels tokens (el domini AuthKit).
 - Endureix Cloudflare a **SSL Full** (Origin Certificate) perquè el JWT no viatgi en clar CF→origen.
